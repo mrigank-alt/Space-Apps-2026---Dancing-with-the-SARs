@@ -5,10 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const dates = ["Jun 17", "Jul 11", "Aug 04", "Aug 28", "Sep 21", "Oct 15", "Nov 08"];
 
 const hotspots = [
-  { name: "Corcoran Bowl", place: "Kings County", rate: -42, confidence: 92, x: 54, y: 62, exposed: "Canals · SR-43" },
-  { name: "Tulare West", place: "Tulare County", rate: -31, confidence: 88, x: 67, y: 70, exposed: "Farms · wells" },
-  { name: "Mendota Reach", place: "Fresno County", rate: -24, confidence: 84, x: 41, y: 43, exposed: "Delta–Mendota Canal" },
-  { name: "Wasco North", place: "Kern County", rate: -18, confidence: 79, x: 59, y: 84, exposed: "Rail · SR-99" },
+  { name: "Point A · Corcoran", place: "36.10° N, 119.56° W", rate: -42, confidence: 92, x: 54, y: 62 },
+  { name: "Point B · Tulare", place: "36.18° N, 119.33° W", rate: -31, confidence: 88, x: 67, y: 70 },
+  { name: "Point C · Mendota", place: "36.75° N, 120.38° W", rate: -24, confidence: 84, x: 41, y: 43 },
+  { name: "Point D · Wasco", place: "35.59° N, 119.34° W", rate: -18, confidence: 79, x: 59, y: 84 },
 ];
 
 function MapCanvas({ step, quality }: { step: number; quality: boolean }) {
@@ -101,22 +101,22 @@ export default function Home() {
     <main>
       <header>
         <div className="brand"><span className="brand-mark">↓</span><div><strong>Groundsignal</strong><small>NISAR displacement explorer</small></div></div>
-        <div className="header-actions"><span className="demo-pill"><i /> DEMO DATA</span><button className="ghost" onClick={() => setAbout(true)}>Data pipeline</button></div>
+        <div className="header-actions"><span className="demo-pill"><i /> DEMO DATA</span><button className="ghost" onClick={() => setAbout(true)}>How to read</button></div>
       </header>
 
       <section className="workspace">
         <aside className="sidebar">
           <div className="eyebrow">STUDY AREA · CALIFORNIA</div>
-          <h1>Where is the ground sinking?</h1>
-          <p className="lede">A feasibility prototype for turning NISAR displacement products into decisions people can see.</p>
+          <h1>View surface displacement over time.</h1>
+          <p className="lede">Each pixel shows radar line-of-sight change between acquisitions. Select a point or move the date slider to inspect the values.</p>
 
           <div className="metric-card">
-            <span>FASTEST OBSERVED</span>
-            <strong>{spot.rate} <small>mm</small></strong>
-            <p>Line-of-sight change since Jun 17</p>
+            <span>DISPLAYED DATA RANGE</span>
+            <strong>−45 <small>to +10 mm</small></strong>
+            <p>Negative = away from satellite · Positive = toward</p>
           </div>
 
-          <div className="section-label"><span>PRIORITY HOTSPOTS</span><span>CHANGE</span></div>
+          <div className="section-label"><span>SAMPLE POINTS</span><span>LOS CHANGE</span></div>
           <div className="hotspot-list">
             {hotspots.map((h, i) => (
               <button key={h.name} className={selected === i ? "hotspot active" : "hotspot"} onClick={() => setSelected(i)}>
@@ -126,23 +126,23 @@ export default function Home() {
           </div>
 
           <div className="quality-row">
-            <div><strong>Quality mask</strong><small>Hide low-coherence pixels</small></div>
+            <div><strong>Coherence mask</strong><small>Hide pixels below the quality threshold</small></div>
             <button aria-label="Toggle quality mask" aria-pressed={quality} onClick={() => setQuality(!quality)} className={`toggle ${quality ? "on" : ""}`}><i /></button>
           </div>
         </aside>
 
         <section className="map-panel">
           <MapCanvas step={step} quality={quality} />
-          <div className="map-label north">CENTRAL VALLEY</div>
+          <div className="map-label north">LINE-OF-SIGHT DISPLACEMENT · MILLIMETRES</div>
           <div className="map-label city c1">FRESNO</div><div className="map-label city c2">VISALIA</div><div className="map-label city c3">BAKERSFIELD</div>
           {hotspots.map((h, i) => <button key={h.name} onClick={() => setSelected(i)} aria-label={`Select ${h.name}`} className={`map-pin ${selected === i ? "selected" : ""}`} style={{ left: `${h.x}%`, top: `${h.y}%` }}><i /><span>{h.rate}</span></button>)}
 
-          <div className="legend"><span>UPLIFT</span><div className="legend-bar" /><span>SUBSIDENCE</span><b>mm</b><div className="ticks"><i>+10</i><i>0</i><i>−20</i><i>−45</i></div></div>
+          <div className="legend"><span>TOWARD SATELLITE</span><div className="legend-bar" /><span>AWAY FROM SATELLITE</span><b>mm</b><div className="ticks"><i>+10</i><i>0</i><i>−20</i><i>−45</i></div></div>
 
           <div className="detail-card">
-            <div className="detail-head"><div><span>SELECTED LOCATION</span><h2>{spot.name}</h2><p>{spot.place}</p></div><div className="confidence"><strong>{spot.confidence}%</strong><span>confidence</span></div></div>
+            <div className="detail-head"><div><span>SELECTED PIXEL</span><h2>{spot.name}</h2><p>{spot.place}</p></div><div className="confidence"><strong>0.{spot.confidence}</strong><span>coherence</span></div></div>
             <MiniChart rate={spot.rate} step={step} />
-            <div className="detail-foot"><div><span>EXPOSED ASSETS</span><strong>{spot.exposed}</strong></div><div><span>INTERPRETATION</span><strong>Persistent downward motion</strong></div></div>
+            <div className="detail-foot"><div><span>CURRENT VALUE</span><strong>{Math.round(spot.rate * (step / 6))} mm LOS change</strong></div><div><span>ACQUISITION PAIR</span><strong>Jun 17 → {dates[step]}, 2026</strong></div></div>
           </div>
 
           <div className="timeline">
@@ -154,7 +154,7 @@ export default function Home() {
         </section>
       </section>
 
-      {about && <div className="modal-backdrop" onClick={() => setAbout(false)}><section className="modal" onClick={e => e.stopPropagation()}><button className="close" onClick={() => setAbout(false)}>×</button><div className="eyebrow">PRODUCTION PATH</div><h2>From archive to map</h2><p>This prototype uses deterministic demo pixels so the interface works without credentials. The production adapter swaps in analysis-ready NISAR products.</p><ol><li><b>Discover</b><span>ASF Search · NISAR GUNW · validated</span></li><li><b>Authenticate</b><span>NASA Earthdata Login</span></li><li><b>Extract</b><span>Displacement + coherence from HDF5</span></li><li><b>Publish</b><span>Cloud-optimized GeoTIFF tiles</span></li></ol><div className="callout"><b>Earthaccess remains useful</b><span>Use it for complementary NASA datasets; use ASF Search for NISAR-specific discovery.</span></div></section></div>}
+      {about && <div className="modal-backdrop" onClick={() => setAbout(false)}><section className="modal" onClick={e => e.stopPropagation()}><button className="close" onClick={() => setAbout(false)}>×</button><div className="eyebrow">HOW TO READ THIS VIEW</div><h2>Values, not conclusions</h2><p>The color and chart represent radar line-of-sight displacement. They do not by themselves identify vertical motion or its cause.</p><ol><li><b>Displacement</b><span>Change along the radar viewing direction, in millimetres</span></li><li><b>Negative</b><span>Motion away from the satellite</span></li><li><b>Positive</b><span>Motion toward the satellite</span></li><li><b>Coherence</b><span>0–1 phase similarity; higher values are generally more reliable</span></li></ol><div className="callout"><b>Demo data</b><span>This interface currently uses a deterministic example surface. A live adapter would replace it with validated NISAR GUNW displacement and coherence layers.</span></div></section></div>}
     </main>
   );
 }
