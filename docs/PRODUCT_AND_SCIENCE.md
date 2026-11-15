@@ -39,7 +39,11 @@ Nearby wells alone do not prove aquifer relevance or causation. The current serv
 
 ### Forecast and recommendations
 
-The application does not forecast a damage date because no calibrated local compaction model, validated threshold, pumping history, and uncertainty model are available. The API returns `forecast.status=not_available` and explains why. Recommendations are qualitative: review highlighted areas against field/irrigation conditions, obtain local well evidence, and refresh when newer observations exist. It never prescribes pumping volumes or claims a benefit from moving pumping within an aquifer.
+The farmer interface presents a short action checklist rather than technical measurements: inspect highlighted land, identify connected wells, preserve pump/irrigation records, compare local well levels, and seek local review when physical signs are present. Farmers can mark steps complete on screen; these marks are device-session guidance, not scientific observations.
+
+The application does not forecast a damage date from satellite movement alone. `CriticalThresholdModel` is a guarded future-model interface that requires a locally validated state and critical threshold, calibrated worsening rate and uncertainty, intervention response time, current pumping rate, calibrated safe pumping rate, model calibration ID, threshold source, and at least six compatible dates. Missing any input returns `forecast.status=not_available`, no date, and no pumping target.
+
+When all inputs are supplied by a future calibrated regional model, the technical interface can return a qualified threshold-crossing range, action-review window, and safe pumping target in the supplied pumping units. The result remains a modelled management threshold—not a claim that land will be “dead” on a certain day. Recommendations remain qualitative in the current live assessment because those calibrated local inputs are unavailable.
 
 ## Main API
 
@@ -55,6 +59,7 @@ The application does not forecast a damage date because no calibrated local comp
 - `GET /api/v1/assessments/{id}/map` — retrieve the map-ready feature collection.
 - `GET /api/v1/assessments/{id}/zones/{zone_id}` — retrieve one clickable zone and its evidence.
 - `GET /api/v1/assessments/{id}/recommendations` — retrieve prioritized farmer guidance.
+- `POST /api/v1/models/critical-threshold/evaluate` — technical, guarded evaluation of future calibrated threshold inputs.
 
 All errors use structured HTTP responses. Invalid/empty/oversized geometries, missing selections, absent imagery, credentials, pipeline failures, and missing assessments are represented separately. Interactive documentation is at `/docs`.
 

@@ -23,6 +23,7 @@ Groundsignal lets a farmer save one or more farm plots, run the integrated NASA 
 - Farm-clipped clickable GeoJSON zones and a source-resolution classification GeoTIFF
 - Modular public-groundwater context using the modern USGS Water Data API where covered, with explicit unavailable/insufficient states elsewhere
 - Plain-language explanations, qualitative urgency, evidence limitations, recommendations, plot switching, refresh, and saved-farm reopening
+- Farmer-first interactive action checklist and guarded future threshold-model interface
 - Frontend geometry tests, backend validation/science/geospatial tests, catalog parsing tests, and drawing-to-API integration tests
 
 Selections and processing-run status are stored in `backend/data/selections.sqlite3`. The database keeps the canonical GeoJSON record and an SQLite R-tree bounding-box index for later candidate-scene and environmental-record queries. Generated raster/cube outputs are stored under `backend/data/processing`. The repository interface can be replaced with PostGIS plus object storage for a multi-user production deployment without changing the selection service layer.

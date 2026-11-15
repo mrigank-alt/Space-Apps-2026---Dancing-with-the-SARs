@@ -99,6 +99,8 @@ def test_classifier_creates_clipped_map_zones_and_withholds_red_without_uncertai
     assessment = AssessmentService(NoGroundwater()).create(saved, run, write_run(tmp_path))
 
     assert assessment.assessment_type == "movement_only"
+    assert assessment.forecast.status == "not_available"
+    assert assessment.forecast.action_deadline_days is None
     assert assessment.overall_concern == "yellow"
     assert len(assessment.concern_zones["features"]) == 3
     assert {item["properties"]["concern_level"] for item in assessment.concern_zones["features"]} == {"green", "yellow"}

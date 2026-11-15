@@ -191,8 +191,36 @@ class GroundwaterEvidence(BaseModel):
 
 class ForecastResult(BaseModel):
     status: Literal["available", "not_available"] = "not_available"
+    title: str = "A safe deadline cannot be calculated yet"
+    urgency: Literal[
+        "routine_monitoring", "monitor_and_investigate", "planned_action", "prompt_review"
+    ] = "monitor_and_investigate"
     summary: str
+    threshold_crossing_days_range: tuple[int, int] | None = None
+    action_deadline_days: int | None = Field(default=None, ge=0)
+    pumping_target: float | None = None
+    pumping_target_units: str | None = None
+    missing_inputs: list[str] = Field(default_factory=list)
+    model_version: str | None = None
+    calibration_id: str | None = None
+    threshold_source: str | None = None
     limitations: list[str] = Field(default_factory=list)
+
+
+class CriticalThresholdRequest(BaseModel):
+    """Technical inputs from a future locally calibrated response model."""
+
+    cell_id: str = Field(..., min_length=1, max_length=200)
+    current_state: float | None = None
+    critical_threshold: float | None = None
+    worsening_rate_per_day: float | None = None
+    rate_uncertainty_per_day: float | None = Field(default=None, ge=0)
+    intervention_lead_days: int | None = Field(default=None, ge=0)
+    current_pumping_rate: float | None = Field(default=None, ge=0)
+    calibrated_safe_pumping_rate: float | None = Field(default=None, ge=0)
+    calibration_id: str | None = Field(default=None, max_length=300)
+    threshold_source: str | None = Field(default=None, max_length=500)
+    observation_count: int = Field(default=0, ge=0)
 
 
 class Recommendation(BaseModel):

@@ -12,14 +12,17 @@ from .config import Settings
 from .errors import GeometryValidationError
 from .models import (
     Assessment,
+    CriticalThresholdRequest,
     ErrorDetail,
     ErrorResponse,
+    ForecastResult,
     ProcessingRun,
     SelectionCreate,
     SelectionResponse,
 )
 from .repository import SQLiteSelectionRepository
 from .processing import GUNWProcessingService
+from .critical_threshold import CriticalThresholdInputs, CriticalThresholdModel
 from .satellite import ASFGUNWCatalog, DisabledGUNWCatalog
 from .service import SelectionService
 
@@ -333,3 +336,16 @@ def get_recommendations(
             code="assessment_not_found", message="No saved assessment exists with that ID."
         )).model_dump(exclude_none=True))
     return [item.model_dump(mode="json") for item in assessment.recommendations]
+
+
+@app.post(
+    "/api/v1/models/critical-threshold/evaluate",
+    response_model=ForecastResult,
+    tags=["technical models"],
+)
+def evaluate_critical_threshold(
+    payload: CriticalThresholdRequest,
+    _authorized: Annotated[None, Depends(require_technical_access)],
+) -> ForecastResult:
+    """Evaluate only fully calibrated inputs; otherwise return a guarded unavailable state."""
+    return CriticalThresholdModel().evaluate(CriticalThresholdInputs(**payload.model_dump()))

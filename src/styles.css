@@ -423,3 +423,80 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+
+/* Farmer-first insight experience */
+.farmer-status { display: flex; gap: 12px; padding: 16px; border: 1px solid #b9c8bf; background: #f6f8f4; }
+.farmer-status .concern-dot { width: 18px; height: 18px; margin-top: 3px; flex: 0 0 auto; border-radius: 50%; background: #7b8581; }
+.farmer-status.level-green .concern-dot { background: #2f7d4b; }
+.farmer-status.level-yellow .concern-dot { background: #d7a51f; }
+.farmer-status.level-red .concern-dot { background: #b83232; }
+.farmer-status small, .deadline-card > small, .action-plan-heading > small, .farmer-zone-card > small { color: #64786f; font-size: 9px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.farmer-status h3 { margin: 3px 0 5px; color: var(--forest); font: 700 21px Georgia, serif; }
+.farmer-status p { margin: 0; color: #4e6559; font-size: 11px; line-height: 1.45; }
+.insight-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin: 12px 0; padding: 3px; border-radius: 5px; background: #dfe7df; }
+.insight-tabs button { min-height: 42px; padding: 6px; border: 0; border-radius: 3px; background: transparent; color: #52675d; font: 800 9px/1.2 ui-sans-serif, sans-serif; cursor: pointer; }
+.insight-tabs button:hover { background: rgba(255,255,255,.65); }
+.insight-tabs button.active { background: white; color: var(--forest); box-shadow: 0 2px 8px rgba(20,55,42,.12); }
+.insight-view { animation: insight-in .18s ease-out; }
+@keyframes insight-in { from { opacity: .4; transform: translateY(3px); } }
+.simple-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 12px 0; font-size: 9px; color: #435c50; }
+.simple-legend span { display: flex; align-items: center; gap: 7px; }
+.simple-legend i { width: 14px; height: 14px; flex: 0 0 auto; border-radius: 3px; background: #7b8581; }
+.simple-legend .legend-green i { background: #2f7d4b; }
+.simple-legend .legend-yellow i { background: #f1c84b; border: 1px solid #987719; }
+.simple-legend .legend-red i { background: #b83232; }
+.farmer-zone-card { padding: 14px; border: 1px solid #bbc8bf; border-left: 6px solid #7b8581; background: #fff; }
+.farmer-zone-card.level-green { border-left-color: #2f7d4b; }
+.farmer-zone-card.level-yellow { border-left-color: #d7a51f; background: #fffaf0; }
+.farmer-zone-card.level-red { border-left-color: #b83232; background: #fff5f3; }
+.farmer-zone-card h4 { margin: 4px 0 11px; color: var(--forest); font: 700 18px Georgia, serif; }
+.farmer-zone-card > div { margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0e6e1; }
+.farmer-zone-card > div strong { color: #294c3c; font-size: 10px; }
+.farmer-zone-card p { margin: 4px 0 0; color: #52685d; font-size: 10px; line-height: 1.5; }
+.zone-action-link { margin-top: 12px; padding: 0; border: 0; background: transparent; color: #1f684b; font: 850 10px ui-sans-serif, sans-serif; cursor: pointer; }
+.map-prompt-card { display: grid; gap: 4px; padding: 14px; border: 1px dashed #aebdb3; background: rgba(255,255,255,.6); color: #315342; }
+.map-prompt-card strong { font-size: 11px; }
+.map-prompt-card span { color: #63766d; font-size: 9px; line-height: 1.4; }
+.action-plan-heading { padding: 4px 1px 10px; }
+.action-plan-heading h4 { margin: 3px 0 4px; color: var(--forest); font: 700 19px Georgia, serif; }
+.action-plan-heading p { margin: 0; color: #5a6e64; font-size: 10px; line-height: 1.45; }
+.farmer-checklist { display: grid; gap: 7px; }
+.farmer-checklist button { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; width: 100%; padding: 11px; border: 1px solid #c6d1c9; border-radius: 4px; background: #fff; color: var(--forest); text-align: left; cursor: pointer; }
+.farmer-checklist button:hover { border-color: #6e9481; background: #f8fbf6; }
+.farmer-checklist button > span { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; background: #edf2ec; color: #426353; font-size: 10px; font-weight: 900; }
+.farmer-checklist button div { display: grid; gap: 3px; }
+.farmer-checklist button strong { font-size: 10px; }
+.farmer-checklist button small { color: #5f7268; font-size: 9px; line-height: 1.4; }
+.farmer-checklist button.complete { border-color: #a5c2ac; background: #edf7ea; }
+.farmer-checklist button.complete > span { background: #397756; color: white; }
+.farmer-checklist button.complete strong { text-decoration: line-through; text-decoration-color: #8ba194; }
+.deadline-card { margin-top: 13px; padding: 14px; border: 1px solid #d7c68d; background: #fff9e9; }
+.deadline-card.available { border-color: #a6c4ad; background: #edf7ec; }
+.deadline-card h4 { margin: 4px 0 6px; color: var(--forest); font: 700 17px Georgia, serif; }
+.deadline-card p { margin: 0; color: #576a61; font-size: 9px; line-height: 1.5; }
+.deadline-missing { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
+.deadline-missing strong { width: 100%; color: #3f594c; font-size: 9px; }
+.deadline-missing span { padding: 5px 7px; border-radius: 12px; background: rgba(255,255,255,.8); color: #5d6d65; font-size: 8px; }
+.deadline-number { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
+.deadline-number strong { color: #2d6e4d; font: 700 28px Georgia, serif; }
+.deadline-number span { color: #53675d; font-size: 9px; }
+.confidence-card { padding: 13px; border: 1px solid #c7d2ca; background: white; }
+.confidence-card > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.confidence-card strong { font-size: 11px; }
+.confidence-card span { padding: 4px 7px; border-radius: 12px; background: #eef1ed; font-size: 8px; font-weight: 850; text-transform: capitalize; }
+.confidence-card .quality-strong { background: #e1f2df; color: #2e6948; }
+.confidence-card .quality-moderate { background: #fff1c9; color: #765a11; }
+.confidence-card p { margin: 7px 0 0; color: #5c7066; font-size: 9px; line-height: 1.45; }
+.assessment-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #c4d0c7; }
+.assessment-footer > span { color: #6b7d74; font-size: 8px; line-height: 1.45; }
+.assessment-footer .refresh-assessment { width: auto; flex: 0 0 auto; margin: 0; padding: 9px 11px; font-size: 8px; }
+.assessment-history { margin: 12px 0 0; }
+
+@media (max-width: 740px) {
+  .farmer-status h3 { font-size: 24px; }
+  .farmer-status p, .action-plan-heading p, .farmer-zone-card p { font-size: 12px; }
+  .insight-tabs button { font-size: 10px; }
+  .farmer-checklist button strong { font-size: 12px; }
+  .farmer-checklist button small, .deadline-card p, .confidence-card p { font-size: 11px; }
+  .simple-legend { font-size: 10px; }
+}

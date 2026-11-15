@@ -17,9 +17,9 @@ from shapely.geometry import Polygon, mapping, shape
 from shapely.ops import transform as transform_geometry
 
 from .groundwater import PublicGroundwaterService
+from .critical_threshold import CriticalThresholdInputs, CriticalThresholdModel
 from .models import (
     Assessment,
-    ForecastResult,
     GroundwaterEvidence,
     ProcessingRun,
     Recommendation,
@@ -116,10 +116,10 @@ class AssessmentService:
             plot_summaries=plot_summaries,
             recommendations=recommendations,
             groundwater=groundwater,
-            forecast=ForecastResult(
-                summary="No forecast is shown because a calibrated local prediction model and validated decision threshold are not available.",
-                limitations=["Observed movement should not be extrapolated as a forecast."],
-            ),
+            forecast=CriticalThresholdModel().evaluate(CriticalThresholdInputs(
+                cell_id="farm_summary",
+                observation_count=int((manifest.get("pair_network") or {}).get("epoch_count") or 0),
+            )),
             limitations=list(dict.fromkeys(limitations)),
             provenance={
                 "satellite_run_id": manifest.get("run_id"),

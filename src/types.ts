@@ -218,7 +218,21 @@ export interface Assessment {
     summary: string;
     limitations: string[];
   };
-  forecast: { status: "available" | "not_available"; summary: string; limitations: string[] };
+  forecast: {
+    status: "available" | "not_available";
+    title: string;
+    urgency: "routine_monitoring" | "monitor_and_investigate" | "planned_action" | "prompt_review";
+    summary: string;
+    threshold_crossing_days_range: [number, number] | null;
+    action_deadline_days: number | null;
+    pumping_target: number | null;
+    pumping_target_units: string | null;
+    missing_inputs: string[];
+    model_version: string | null;
+    calibration_id: string | null;
+    threshold_source: string | null;
+    limitations: string[];
+  };
   limitations: string[];
   provenance: Record<string, unknown>;
 }
