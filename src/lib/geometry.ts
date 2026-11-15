@@ -20,7 +20,7 @@ export function boundaryFromSnapshot(
   const plots = features.filter((feature): feature is Feature<Polygon> => {
     if (feature.geometry.type !== "Polygon") return false;
     const mode = feature.properties?.mode;
-    return mode === "polygon" || mode === "freehand" || mode === "rectangle";
+    return mode === "polygon" || mode === "freehand";
   });
 
   if (plots.length === 0) return null;

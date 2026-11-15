@@ -1,12 +1,32 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
+import backend.app.main as main_module
 from backend.app.main import app
 
 
 client = TestClient(app)
+
+
+def farmer_payload() -> dict[str, object]:
+    return {
+        "farmer": {
+            "operator_name": "Taylor Miller",
+            "contact_email": "taylor@example.com",
+            "contact_phone": "+1 555 0100",
+        },
+        "farm_profile": {
+            "primary_crop_or_land_use": "Alfalfa",
+            "water_source": "groundwater_well",
+            "monitoring_goal": "groundwater_risk",
+            "location_label": "Southern Alberta",
+        },
+        "data_processing_consent": True,
+    }
 
 
 def test_drawn_boundary_reaches_api_and_returns_reusable_selection() -> None:
@@ -31,6 +51,7 @@ def test_drawn_boundary_reaches_api_and_returns_reusable_selection() -> None:
             "geometry": terra_draw_geometry,
             "source": "drawn",
             "label": "South pivot field",
+            **farmer_payload(),
         },
     )
 
@@ -55,6 +76,7 @@ def test_invalid_drawn_boundary_returns_actionable_error() -> None:
         "/api/v1/selections",
         json={
             "label": "Invalid example",
+            **farmer_payload(),
             "geometry": {
                 "type": "Polygon",
                 "coordinates": [
@@ -82,7 +104,12 @@ def test_multiple_plots_are_saved_as_one_queryable_farm_selection() -> None:
 
     response = client.post(
         "/api/v1/selections",
-        json={"geometry": geometry, "source": "drawn", "label": "Miller Family Farm"},
+        json={
+            "geometry": geometry,
+            "source": "drawn",
+            "label": "Miller Family Farm",
+            **farmer_payload(),
+        },
     )
 
     assert response.status_code == 201
@@ -102,7 +129,8 @@ def test_multiple_plots_are_saved_as_one_queryable_farm_selection() -> None:
 
 def test_missing_geometry_returns_consistent_error_envelope() -> None:
     response = client.post(
-        "/api/v1/selections", json={"source": "drawn", "label": "Missing geometry"}
+        "/api/v1/selections",
+        json={"source": "drawn", "label": "Missing geometry", **farmer_payload()},
     )
 
     assert response.status_code == 422
@@ -118,8 +146,60 @@ def test_name_is_required_for_a_saved_boundary() -> None:
                 "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]],
             },
             "source": "drawn",
+            **farmer_payload(),
         },
     )
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_farmer_profile_and_satellite_status_are_saved() -> None:
+    response = client.post(
+        "/api/v1/selections",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0]]],
+            },
+            "source": "drawn",
+            "label": "Miller Family Farm",
+            **farmer_payload(),
+        },
+    )
+
+    assert response.status_code == 201
+    saved = response.json()
+    assert saved["farmer"]["operator_name"] == "Taylor Miller"
+    assert saved["farm_profile"]["water_source"] == "groundwater_well"
+    assert saved["data_processing_consent"] is True
+    assert saved["consent_recorded_at"]
+    assert saved["gunw_availability"]["status"] == "not_checked"
+
+
+def test_technical_records_are_protected_when_key_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = client.post(
+        "/api/v1/selections",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0]]],
+            },
+            "source": "drawn",
+            "label": "Protected Farm",
+            **farmer_payload(),
+        },
+    )
+    selection_id = response.json()["selection_id"]
+    protected_settings = replace(
+        main_module.settings,
+        technical_api_key="test-technical-key",
+    )
+    monkeypatch.setattr(main_module, "settings", protected_settings)
+
+    assert client.get(f"/api/v1/selections/{selection_id}").status_code == 401
+    authorized = client.get(
+        f"/api/v1/selections/{selection_id}",
+        headers={"X-Technical-API-Key": "test-technical-key"},
+    )
+    assert authorized.status_code == 200

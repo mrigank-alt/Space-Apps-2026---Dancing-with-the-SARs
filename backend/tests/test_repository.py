@@ -40,6 +40,8 @@ def test_selection_survives_repository_recreation(tmp_path) -> None:
     assert restored.label == "North irrigation field"
     assert restored.geometry["type"] == "Polygon"
     assert restored.area.hectares == 1
+    assert restored.plot_count == 1
+    assert restored.plots[0].plot_id == "sel_persistence_test_plot_001"
 
 
 def test_rtree_finds_only_intersecting_selections(tmp_path) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Protocol
 
-from .models import SpatialSelection
+from .models import PlotRecord, SpatialSelection
 
 
 class SelectionRepository(Protocol):
@@ -102,6 +102,45 @@ class SQLiteSelectionRepository:
         geometry_json = json.dumps(selection.geometry, separators=(",", ":"))
         west, south, east, north = selection.bbox
         with self._lock, self._connection:
+            existing = self._connection.execute(
+                "SELECT id FROM selections WHERE selection_id = ?",
+                (selection.selection_id,),
+            ).fetchone()
+            if existing is not None:
+                row_id = int(existing["id"])
+                self._connection.execute(
+                    """
+                    UPDATE selections SET
+                        label = ?, geometry_type = ?, geometry_json = ?, record_json = ?,
+                        min_longitude = ?, min_latitude = ?, max_longitude = ?,
+                        max_latitude = ?, area_square_meters = ?, created_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        selection.label,
+                        selection.geometry["type"],
+                        geometry_json,
+                        record_json,
+                        west,
+                        south,
+                        east,
+                        north,
+                        selection.area.square_meters,
+                        selection.created_at.isoformat(),
+                        row_id,
+                    ),
+                )
+                self._connection.execute(
+                    """
+                    UPDATE selection_bounds SET
+                        min_longitude = ?, max_longitude = ?,
+                        min_latitude = ?, max_latitude = ?
+                    WHERE id = ?
+                    """,
+                    (west, east, south, north, row_id),
+                )
+                return selection
+
             cursor = self._connection.execute(
                 """
                 INSERT INTO selections (
@@ -162,4 +201,16 @@ class SQLiteSelectionRepository:
     def _record(row: sqlite3.Row | None) -> SpatialSelection | None:
         if row is None:
             return None
-        return SpatialSelection.model_validate(json.loads(row["record_json"]))
+        selection = SpatialSelection.model_validate(json.loads(row["record_json"]))
+        if selection.plots:
+            return selection
+        legacy_plot = PlotRecord(
+            plot_id=f"{selection.selection_id}_plot_001",
+            plot_index=1,
+            geometry=selection.geometry,
+            bbox=selection.bbox,
+            centroid=selection.centroid,
+            reference_point=selection.reference_point,
+            area=selection.area,
+        )
+        return selection.model_copy(update={"plots": [legacy_plot], "plot_count": 1})

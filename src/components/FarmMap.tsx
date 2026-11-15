@@ -12,7 +12,6 @@ import {
   TerraDrawFreehandMode,
   TerraDrawModeUndoRedo,
   TerraDrawPolygonMode,
-  TerraDrawRectangleMode,
   TerraDrawSelectMode,
   TerraDrawSessionUndoRedo,
   TerraDrawUndoRedoKeyboardShortcuts,
@@ -59,7 +58,6 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
   const locationMarkerRef = useRef<Marker | undefined>(undefined);
   const callbackRef = useRef({ onBoundaryChange, onToolChange, onUndoAvailability });
   const [ready, setReady] = useState(false);
-  const [pointer, setPointer] = useState<[number, number] | null>(null);
   const [basemapMode, setBasemapMode] = useState<"satellite" | "map">("satellite");
 
   callbackRef.current = { onBoundaryChange, onToolChange, onUndoAvailability };
@@ -103,8 +101,6 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "imperial", maxWidth: 140 }), "bottom-left");
-    map.on("mousemove", (event) => setPointer([event.lngLat.lng, event.lngLat.lat]));
-    map.on("mouseout", () => setPointer(null));
 
     map.once("load", () => {
       const draw = new TerraDraw({
@@ -143,14 +139,6 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
               closingPointOutlineWidth: 2,
             },
           }),
-          new TerraDrawRectangleMode({
-            styles: {
-              fillColor: "#d8ff70",
-              fillOpacity: 0.28,
-              outlineColor: "#ffffff",
-              outlineWidth: 3,
-            },
-          }),
           new TerraDrawSelectMode({
             allowManualDeselection: false,
             flags: {
@@ -171,16 +159,6 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
                     draggable: true,
                     deletable: true,
                     midpoints: false,
-                  },
-                },
-              },
-              rectangle: {
-                feature: {
-                  draggable: true,
-                  coordinates: {
-                    draggable: true,
-                    deletable: false,
-                    resizable: "opposite",
                   },
                 },
               },
@@ -237,7 +215,7 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
     const draw = drawRef.current;
     if (!draw || !ready) return;
     const mode =
-      activeTool === "polygon" || activeTool === "freehand" || activeTool === "rectangle"
+      activeTool === "polygon" || activeTool === "freehand"
         ? activeTool
         : "select";
     if (draw.getMode() !== mode) draw.setMode(mode);
@@ -302,7 +280,7 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
     : configuration.providerNotice;
 
   return (
-    <div className={`map-stage ${activeTool === "polygon" || activeTool === "freehand" || activeTool === "rectangle" ? "is-drawing" : ""}`}>
+    <div className={`map-stage ${activeTool === "polygon" || activeTool === "freehand" ? "is-drawing" : ""}`}>
       <div ref={containerRef} className="map" aria-label="Interactive farm boundary map" />
       {!ready && <div className="map-loading"><span /> Loading map…</div>}
       {configuration.basemapToggle && (
@@ -340,9 +318,6 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
         <span className={basemapMode === "satellite" ? "satellite-dot" : "demo-dot"} />
         <strong>{providerName}</strong>
         <small>{providerNotice}</small>
-      </div>
-      <div className="coordinate-readout" aria-hidden="true">
-        {pointer ? `${pointer[1].toFixed(5)}, ${pointer[0].toFixed(5)}` : "EPSG:4326 · lon/lat"}
       </div>
     </div>
   );

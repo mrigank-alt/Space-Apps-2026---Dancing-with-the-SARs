@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FarmMap, type FarmMapHandle } from "./components/FarmMap";
+import { FarmProfileForm, type FarmFormValues } from "./components/FarmProfileForm";
 import { LocationSearch } from "./components/LocationSearch";
-import { createSelection, selectionRecordUrl } from "./lib/api";
+import { createSelection } from "./lib/api";
 import { getMapConfiguration } from "./lib/config";
 import { boundaryArea, boundaryPlotAreas, formatArea } from "./lib/geometry";
 import type {
@@ -13,6 +14,7 @@ import type {
 
 export default function App() {
   const mapRef = useRef<FarmMapHandle>(null);
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const configuration = useMemo(() => getMapConfiguration(), []);
   const [location, setLocation] = useState<SearchResult | null>(null);
   const [boundary, setBoundary] = useState<BoundaryFeature | null>(null);
@@ -23,13 +25,34 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>();
   const [confirmed, setConfirmed] = useState<SelectionResponse | null>(null);
-  const [selectionName, setSelectionName] = useState("");
+  const [farmForm, setFarmForm] = useState<FarmFormValues>({
+    farmName: "",
+    operatorName: "",
+    email: "",
+    phone: "",
+    cropOrLandUse: "",
+    waterSource: "",
+    consent: false,
+  });
 
   const area = boundary ? boundaryArea(boundary) : null;
   const plotAreas = boundary ? boundaryPlotAreas(boundary) : [];
   const plotCount = plotAreas.length;
+  const profileComplete = Boolean(
+    farmForm.farmName.trim()
+      && farmForm.operatorName.trim().length >= 2
+      && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(farmForm.email.trim())
+      && farmForm.cropOrLandUse.trim().length >= 2
+      && farmForm.waterSource
+      && farmForm.consent,
+  );
 
-  function beginDraw(tool: "polygon" | "freehand" | "rectangle") {
+  useEffect(() => {
+    if (!confirmed) return;
+    confirmationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [confirmed]);
+
+  function beginDraw(tool: "polygon" | "freehand") {
     setConfirmed(null);
     setSubmitError(undefined);
     setActiveTool(tool);
@@ -77,12 +100,26 @@ export default function App() {
   }
 
   async function confirmSelection() {
-    const label = selectionName.trim();
-    if (!boundary || !label) return;
+    if (!boundary || !profileComplete || !farmForm.waterSource) return;
     setSubmitting(true);
     setSubmitError(undefined);
     try {
-      const response = await createSelection(boundary, label);
+      const response = await createSelection(boundary, {
+        label: farmForm.farmName.trim(),
+        farmer: {
+          operator_name: farmForm.operatorName.trim(),
+          contact_email: farmForm.email.trim(),
+          ...(farmForm.phone.trim() ? { contact_phone: farmForm.phone.trim() } : {}),
+        },
+        farm_profile: {
+          primary_crop_or_land_use: farmForm.cropOrLandUse.trim(),
+          water_source: farmForm.waterSource,
+          monitoring_goal: "groundwater_risk",
+          ...(location?.label ? { location_label: location.label } : {}),
+          ...(location?.context ? { location_context: location.context } : {}),
+        },
+        data_processing_consent: true,
+      });
       setConfirmed(response);
       setActiveTool("idle");
     } catch (error) {
@@ -100,7 +137,15 @@ export default function App() {
     mapRef.current?.clear();
     setBoundary(null);
     setConfirmed(null);
-    setSelectionName("");
+    setFarmForm({
+      farmName: "",
+      operatorName: "",
+      email: "",
+      phone: "",
+      cropOrLandUse: "",
+      waterSource: "",
+      consent: false,
+    });
     setSubmitError(undefined);
     setActiveTool("idle");
   }
@@ -112,12 +157,12 @@ export default function App() {
           <div className="brand-mark" aria-hidden="true"><span /></div>
           <div>
             <strong>Groundsignal</strong>
-            <small>Farm boundary setup</small>
+            <small>Farm setup</small>
           </div>
         </div>
-        <div className="iteration-label">
+        <div className="product-status">
           <span />
-          ITERATION 01 · BOUNDARY ONLY
+          FARM SETUP
         </div>
       </header>
 
@@ -125,14 +170,34 @@ export default function App() {
         <aside className="side-panel" aria-label="Farm boundary workflow">
           <div className="panel-intro">
             <span className="eyebrow">START YOUR FARM PROFILE</span>
-            <h1>Mark the land you want to monitor.</h1>
+            <h1>Tell us about your farm.</h1>
             <p>
-              Find the general area, then draw the actual farm boundary. Environmental analysis comes in a later iteration.
+              Add your farm details, find your land, and mark each plot you want included.
             </p>
           </div>
 
-          <section className="workflow-step is-complete">
+          <section className={`workflow-step ${profileComplete ? "is-complete" : "is-active"}`}>
             <div className="step-index">01</div>
+            <div className="step-content">
+              <div className="step-title">
+                <h2>About your farm</h2>
+                {profileComplete && <span className="step-check" aria-label="Complete">✓</span>}
+              </div>
+              <p>These details help us keep your farm and plots organized.</p>
+              <FarmProfileForm
+                values={farmForm}
+                disabled={Boolean(confirmed)}
+                onChange={(values) => {
+                  setFarmForm(values);
+                  setConfirmed(null);
+                  setSubmitError(undefined);
+                }}
+              />
+            </div>
+          </section>
+
+          <section className={`workflow-step ${location ? "is-complete" : ""}`}>
+            <div className="step-index">02</div>
             <div className="step-content">
               <div className="step-title">
                 <h2>Find the area</h2>
@@ -149,13 +214,13 @@ export default function App() {
               )}
               <div className="separation-note">
                 <b>Location is not the boundary.</b>
-                <span>Search only moves the map. You choose the land in step 2.</span>
+                <span>Search only moves the map. You mark the actual plots in the next step.</span>
               </div>
             </div>
           </section>
 
           <section className={`workflow-step ${boundary ? "is-complete" : "is-active"}`}>
-            <div className="step-index">02</div>
+            <div className="step-index">03</div>
             <div className="step-content">
               <div className="step-title">
                 <h2>Draw your plots</h2>
@@ -181,24 +246,13 @@ export default function App() {
                   <span className="trace-icon" aria-hidden="true">〰</span>
                   <span><strong>{boundary ? "Add trace" : "Trace"}</strong><small>Drag curved edges</small></span>
                 </button>
-                <button
-                  type="button"
-                  className={activeTool === "rectangle" ? "tool-button active" : "tool-button"}
-                  aria-pressed={activeTool === "rectangle"}
-                  onClick={() => beginDraw("rectangle")}
-                >
-                  <span className="rectangle-icon" aria-hidden="true" />
-                  <span><strong>{boundary ? "Add rectangle" : "Rectangle"}</strong><small>Two opposite corners</small></span>
-                </button>
               </div>
-              {(activeTool === "polygon" || activeTool === "freehand" || activeTool === "rectangle") && (
+              {(activeTool === "polygon" || activeTool === "freehand") && (
                 <div className="drawing-hint" role="status">
                   <span className="pulse" />
                   {activeTool === "polygon"
                     ? "Click around the field. Click the first point to finish."
-                    : activeTool === "freehand"
-                      ? "Press and drag around the field edge. Release to close the trace."
-                    : "Click one corner, then the opposite corner."}
+                    : "Press and drag around the field edge. Release to close the trace."}
                 </div>
               )}
               {boundary && (
@@ -236,21 +290,9 @@ export default function App() {
           </section>
 
           <section className={`workflow-step review-step ${boundary ? "is-active" : ""}`}>
-            <div className="step-index">03</div>
+            <div className="step-index">04</div>
             <div className="step-content">
-              <div className="step-title"><h2>Review & confirm</h2></div>
-              <label className="selection-name-field">
-                  <span>Farm or property name</span>
-                <input
-                  type="text"
-                  value={selectionName}
-                  maxLength={200}
-                  placeholder="e.g. Miller Family Farm"
-                  disabled={!boundary || Boolean(confirmed)}
-                  onChange={(event) => setSelectionName(event.target.value)}
-                />
-                <small>All selected plots are saved together under this name.</small>
-              </label>
+              <div className="step-title"><h2>Review your plots</h2></div>
               {area ? (
                 <>
                   <div className="area-card">
@@ -271,7 +313,7 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <p className="area-note">Calculated geodesically from the drawn EPSG:4326 boundary.</p>
+                  <p className="area-note">Area is estimated from the boundary you drew.</p>
                 </>
               ) : (
                 <div className="empty-review"><span aria-hidden="true">⌗</span> Area appears after drawing</div>
@@ -280,47 +322,77 @@ export default function App() {
           </section>
 
           <div className="confirm-zone">
-            <button
-              type="button"
-              className="confirm-button"
-              onClick={confirmSelection}
-              disabled={
-                !boundary || !selectionName.trim() || submitting || Boolean(confirmed)
-              }
-            >
-              {submitting
-                ? "Validating boundary…"
-                : confirmed
-                  ? "Selection confirmed"
-                  : `Save ${plotCount} ${plotCount === 1 ? "plot" : "plots"}`}
-              <span aria-hidden="true">→</span>
-            </button>
-            <small>No satellite or groundwater analysis runs at this step.</small>
+            {!confirmed && (
+              <>
+                <button
+                  type="button"
+                  className="confirm-button"
+                  onClick={confirmSelection}
+                  disabled={!boundary || !profileComplete || submitting}
+                >
+                  {submitting ? "Saving your farm…" : `Save ${plotCount} ${plotCount === 1 ? "plot" : "plots"}`}
+                  <span aria-hidden="true">→</span>
+                </button>
+                <small>We’ll save your farm and check whether suitable satellite imagery is available.</small>
+              </>
+            )}
+            {boundary && !profileComplete && !confirmed && (
+              <div className="form-reminder" role="status">
+                Complete the required farm details and consent in step 1 before saving.
+              </div>
+            )}
             {submitError && <div className="submit-error" role="alert">{submitError}</div>}
             {confirmed && (
-              <div className="confirmation-card" role="status">
-                <div className="confirmation-heading"><span>✓</span><strong>Farm plots saved</strong></div>
+              <div ref={confirmationRef} className="confirmation-card" role="status" tabIndex={-1}>
+                <div className="confirmation-heading"><span>✓</span><strong>Your farm is saved</strong></div>
                 <h3>{confirmed.label}</h3>
-                <p>{confirmed.plot_count} {confirmed.plot_count === 1 ? "plot is" : "plots are"} saved persistently and ready for future risk-map spatial queries.</p>
-                <small className="confirmation-id-label">Selection ID · used to retrieve this boundary later</small>
-                <code>{confirmed.selection_id}</code>
+                <p>Your farm details and boundaries were saved successfully.</p>
                 <div className="confirmation-metrics">
                   <span>{formatArea(confirmed.area.acres)} acres</span>
-                  <span>EPSG:4326</span>
+                  <span>{confirmed.plot_count} {confirmed.plot_count === 1 ? "plot" : "plots"}</span>
                 </div>
                 <dl className="saved-data-summary">
-                  <div><dt>Plots</dt><dd>{confirmed.plot_count}</dd></div>
-                  <div><dt>Geometry</dt><dd>{confirmed.geometry.type}</dd></div>
-                  <div><dt>Bounds</dt><dd>{confirmed.bbox.map((value) => value.toFixed(5)).join(", ")}</dd></div>
+                  <div><dt>Farm contact</dt><dd>{confirmed.farmer?.operator_name ?? "Not provided"}</dd></div>
+                  <div><dt>Land use</dt><dd>{confirmed.farm_profile?.primary_crop_or_land_use ?? "Not provided"}</dd></div>
                 </dl>
-                <a
-                  className="view-record-link"
-                  href={selectionRecordUrl(confirmed.selection_id)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  View saved GeoJSON data <span aria-hidden="true">↗</span>
-                </a>
+                {confirmed.gunw_availability && (
+                  <div className={`satellite-result ${confirmed.gunw_availability.status}`}>
+                    <div className="satellite-result-heading">
+                      <span aria-hidden="true">
+                        {["available", "partial", "source_available"].includes(confirmed.gunw_availability.status) ? "✓" : "i"}
+                      </span>
+                      <strong>
+                        {["available", "partial", "source_available"].includes(confirmed.gunw_availability.status)
+                          ? "Satellite imagery found"
+                          : confirmed.gunw_availability.status === "not_available"
+                            ? "Imagery is not available yet"
+                            : "Availability check pending"}
+                      </strong>
+                    </div>
+                    <p>
+                      {["available", "partial", "source_available"].includes(confirmed.gunw_availability.status)
+                        ? "We found imagery that covers your land. Your saved plots are ready for the next step."
+                        : confirmed.gunw_availability.status === "not_available"
+                          ? "Your farm is saved. We couldn’t find suitable imagery for this land right now."
+                          : "Your farm is saved. We’ll need to check imagery availability again later."}
+                    </p>
+                    <div className="plot-coverage-list">
+                      {confirmed.gunw_availability.plot_results.map((result, index) => (
+                        <div key={result.plot_id}>
+                          <span>Plot {index + 1}</span>
+                          <strong>
+                            {result.status === "available" || result.status === "source_available"
+                              ? "Imagery found"
+                              : result.status === "not_available" ? "Not available yet" : "Check pending"}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button type="button" className="new-farm-button" onClick={clearSelection}>
+                  Set up another farm
+                </button>
               </div>
             )}
           </div>

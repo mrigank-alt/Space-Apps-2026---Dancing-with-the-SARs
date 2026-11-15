@@ -1,15 +1,20 @@
-import type { BoundaryFeature, SelectionResponse, ApiErrorBody } from "../types";
+import type {
+  ApiErrorBody,
+  BoundaryFeature,
+  SelectionCreateDetails,
+  SelectionResponse,
+} from "../types";
 import { API_BASE_URL } from "./config";
 
 export async function createSelection(
   feature: BoundaryFeature,
-  label: string,
+  details: SelectionCreateDetails,
   signal?: AbortSignal,
 ): Promise<SelectionResponse> {
   const response = await fetch(`${API_BASE_URL}/api/v1/selections`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ geometry: feature.geometry, source: "drawn", label }),
+    body: JSON.stringify({ geometry: feature.geometry, source: "drawn", ...details }),
     signal,
   });
 
@@ -26,8 +31,4 @@ export async function createSelection(
   }
 
   return (await response.json()) as SelectionResponse;
-}
-
-export function selectionRecordUrl(selectionId: string): string {
-  return `${API_BASE_URL}/api/v1/selections/${encodeURIComponent(selectionId)}`;
 }

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Request, status
+import secrets
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,19 +17,29 @@ from .models import (
     SelectionResponse,
 )
 from .repository import SQLiteSelectionRepository
+from .satellite import ASFGUNWCatalog, DisabledGUNWCatalog
 from .service import SelectionService
 
 
 settings = Settings.from_environment()
 repository = SQLiteSelectionRepository(settings.database_path)
-service = SelectionService(settings, repository)
+gunw_catalog = (
+    ASFGUNWCatalog(
+        settings.asf_search_api_url,
+        settings.gunw_catalog_timeout_seconds,
+        settings.gunw_product_sample_limit,
+    )
+    if settings.gunw_catalog_enabled
+    else DisabledGUNWCatalog()
+)
+service = SelectionService(settings, repository, gunw_catalog)
 
 app = FastAPI(
     title="Groundsignal Farm Selection API",
-    version="0.1.0",
+    version="1.0.0",
     description=(
-        "Validates and normalizes farmer-confirmed GeoJSON boundaries. "
-        "Satellite retrieval and risk modeling are intentionally out of scope."
+        "Stores farmer-confirmed plot boundaries and checks whether suitable "
+        "satellite imagery is available."
     ),
 )
 app.add_middleware(
@@ -34,8 +47,19 @@ app.add_middleware(
     allow_origins=list(settings.cors_origins),
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Technical-API-Key"],
 )
+
+
+def require_technical_access(
+    supplied_key: Annotated[str | None, Header(alias="X-Technical-API-Key")] = None,
+) -> None:
+    """Protect farmer records and operational refresh actions outside local development."""
+    expected_key = settings.technical_api_key
+    if expected_key is None:
+        return
+    if supplied_key is None or not secrets.compare_digest(supplied_key, expected_key):
+        raise HTTPException(status_code=401, detail="Technical access key required.")
 
 
 @app.exception_handler(GeometryValidationError)
@@ -91,7 +115,10 @@ def create_selection(payload: SelectionCreate) -> SelectionResponse:
     responses={404: {"model": ErrorResponse}},
     tags=["selections"],
 )
-def get_selection(selection_id: str) -> SelectionResponse | JSONResponse:
+def get_selection(
+    selection_id: str,
+    _authorized: Annotated[None, Depends(require_technical_access)],
+) -> SelectionResponse | JSONResponse:
     selection = service.get(selection_id)
     if selection is None:
         payload = ErrorResponse(
@@ -99,6 +126,29 @@ def get_selection(selection_id: str) -> SelectionResponse | JSONResponse:
                 code="selection_not_found",
                 message="No saved selection exists with that ID.",
                 hint="Check the selection ID or confirm the boundary again.",
+            )
+        )
+        return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
+    return SelectionResponse.from_record(selection)
+
+
+@app.post(
+    "/api/v1/selections/{selection_id}/gunw-availability",
+    response_model=SelectionResponse,
+    responses={404: {"model": ErrorResponse}},
+    tags=["satellite availability"],
+)
+def refresh_gunw_availability(
+    selection_id: str,
+    _authorized: Annotated[None, Depends(require_technical_access)],
+) -> SelectionResponse | JSONResponse:
+    selection = service.refresh_gunw_availability(selection_id)
+    if selection is None:
+        payload = ErrorResponse(
+            error=ErrorDetail(
+                code="selection_not_found",
+                message="No saved farm exists with that ID.",
+                hint="Check the selection ID and try again.",
             )
         )
         return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
