@@ -3,7 +3,7 @@ import { FarmMap, type FarmMapHandle } from "./components/FarmMap";
 import { LocationSearch } from "./components/LocationSearch";
 import { createSelection, selectionRecordUrl } from "./lib/api";
 import { getMapConfiguration } from "./lib/config";
-import { boundaryArea, formatArea } from "./lib/geometry";
+import { boundaryArea, boundaryPlotAreas, formatArea } from "./lib/geometry";
 import type {
   BoundaryFeature,
   DrawingTool,
@@ -26,12 +26,11 @@ export default function App() {
   const [selectionName, setSelectionName] = useState("");
 
   const area = boundary ? boundaryArea(boundary) : null;
+  const plotAreas = boundary ? boundaryPlotAreas(boundary) : [];
+  const plotCount = plotAreas.length;
 
   function beginDraw(tool: "polygon" | "freehand" | "rectangle") {
-    if (boundary) mapRef.current?.clear();
-    setBoundary(null);
     setConfirmed(null);
-    setSelectionName("");
     setSubmitError(undefined);
     setActiveTool(tool);
   }
@@ -159,10 +158,10 @@ export default function App() {
             <div className="step-index">02</div>
             <div className="step-content">
               <div className="step-title">
-                <h2>Draw the farm</h2>
+                <h2>Draw your plots</h2>
                 {boundary && <span className="step-check" aria-label="Complete">✓</span>}
               </div>
-              <p>Choose the tool that best matches the field edges.</p>
+              <p>Add every separate plot you want included. You can mix drawing tools.</p>
               <div className="drawing-tools" role="group" aria-label="Boundary drawing tools">
                 <button
                   type="button"
@@ -171,7 +170,7 @@ export default function App() {
                   onClick={() => beginDraw("polygon")}
                 >
                   <span className="polygon-icon" aria-hidden="true">⌁</span>
-                  <span><strong>Polygon</strong><small>Click each corner</small></span>
+                  <span><strong>{boundary ? "Add polygon" : "Polygon"}</strong><small>Click each corner</small></span>
                 </button>
                 <button
                   type="button"
@@ -180,7 +179,7 @@ export default function App() {
                   onClick={() => beginDraw("freehand")}
                 >
                   <span className="trace-icon" aria-hidden="true">〰</span>
-                  <span><strong>Trace</strong><small>Drag curved edges</small></span>
+                  <span><strong>{boundary ? "Add trace" : "Trace"}</strong><small>Drag curved edges</small></span>
                 </button>
                 <button
                   type="button"
@@ -189,7 +188,7 @@ export default function App() {
                   onClick={() => beginDraw("rectangle")}
                 >
                   <span className="rectangle-icon" aria-hidden="true" />
-                  <span><strong>Rectangle</strong><small>Two opposite corners</small></span>
+                  <span><strong>{boundary ? "Add rectangle" : "Rectangle"}</strong><small>Two opposite corners</small></span>
                 </button>
               </div>
               {(activeTool === "polygon" || activeTool === "freehand" || activeTool === "rectangle") && (
@@ -200,6 +199,12 @@ export default function App() {
                     : activeTool === "freehand"
                       ? "Press and drag around the field edge. Release to close the trace."
                     : "Click one corner, then the opposite corner."}
+                </div>
+              )}
+              {boundary && (
+                <div className="plot-count-banner" role="status">
+                  <strong>{plotCount} {plotCount === 1 ? "plot" : "plots"} selected</strong>
+                  <span>Choose a drawing tool again to add another plot.</span>
                 </div>
               )}
               <div className="edit-actions">
@@ -235,16 +240,16 @@ export default function App() {
             <div className="step-content">
               <div className="step-title"><h2>Review & confirm</h2></div>
               <label className="selection-name-field">
-                <span>Farm or field name</span>
+                  <span>Farm or property name</span>
                 <input
                   type="text"
                   value={selectionName}
                   maxLength={200}
-                  placeholder="e.g. North pivot field"
+                  placeholder="e.g. Miller Family Farm"
                   disabled={!boundary || Boolean(confirmed)}
                   onChange={(event) => setSelectionName(event.target.value)}
                 />
-                <small>This name is saved with the GeoJSON boundary.</small>
+                <small>All selected plots are saved together under this name.</small>
               </label>
               {area ? (
                 <>
@@ -257,6 +262,14 @@ export default function App() {
                       <span>METRIC</span>
                       <strong>{formatArea(area.hectares)} <small>hectares</small></strong>
                     </div>
+                  </div>
+                  <div className="plot-area-list" aria-label="Selected plot areas">
+                    {plotAreas.map((plotArea, index) => (
+                      <div key={index}>
+                        <span>Plot {index + 1}</span>
+                        <strong>{formatArea(plotArea.acres)} acres</strong>
+                      </div>
+                    ))}
                   </div>
                   <p className="area-note">Calculated geodesically from the drawn EPSG:4326 boundary.</p>
                 </>
@@ -279,16 +292,16 @@ export default function App() {
                 ? "Validating boundary…"
                 : confirmed
                   ? "Selection confirmed"
-                  : "Confirm selection"}
+                  : `Save ${plotCount} ${plotCount === 1 ? "plot" : "plots"}`}
               <span aria-hidden="true">→</span>
             </button>
             <small>No satellite or groundwater analysis runs at this step.</small>
             {submitError && <div className="submit-error" role="alert">{submitError}</div>}
             {confirmed && (
               <div className="confirmation-card" role="status">
-                <div className="confirmation-heading"><span>✓</span><strong>Boundary confirmed</strong></div>
+                <div className="confirmation-heading"><span>✓</span><strong>Farm plots saved</strong></div>
                 <h3>{confirmed.label}</h3>
-                <p>Saved persistently and ready for future spatial queries.</p>
+                <p>{confirmed.plot_count} {confirmed.plot_count === 1 ? "plot is" : "plots are"} saved persistently and ready for future risk-map spatial queries.</p>
                 <small className="confirmation-id-label">Selection ID · used to retrieve this boundary later</small>
                 <code>{confirmed.selection_id}</code>
                 <div className="confirmation-metrics">
@@ -296,6 +309,7 @@ export default function App() {
                   <span>EPSG:4326</span>
                 </div>
                 <dl className="saved-data-summary">
+                  <div><dt>Plots</dt><dd>{confirmed.plot_count}</dd></div>
                   <div><dt>Geometry</dt><dd>{confirmed.geometry.type}</dd></div>
                   <div><dt>Bounds</dt><dd>{confirmed.bbox.map((value) => value.toFixed(5)).join(", ")}</dd></div>
                 </dl>
@@ -340,10 +354,10 @@ export default function App() {
           />
           <div className="map-instruction">
             <span aria-hidden="true">i</span>
-            <strong>{boundary ? "Boundary selected" : "Search, then draw"}</strong>
+            <strong>{boundary ? `${plotCount} ${plotCount === 1 ? "plot" : "plots"} selected` : "Search, then draw"}</strong>
             <small>
               {boundary
-                ? "Drag the white handles to refine field edges."
+                ? "Add another plot with a drawing tool, or edit the selected plot using its white handles."
                 : "The location pin is a reference point, not your farm boundary."}
             </small>
           </div>

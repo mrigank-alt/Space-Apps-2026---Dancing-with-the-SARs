@@ -39,6 +39,18 @@ class PointFeature(BaseModel):
     properties: dict[str, str] = Field(default_factory=dict)
 
 
+class PlotRecord(BaseModel):
+    """One independently queryable parcel within a saved farm selection."""
+
+    plot_id: str
+    plot_index: int = Field(..., ge=1)
+    geometry: GeoJSONGeometry
+    bbox: tuple[float, float, float, float]
+    centroid: PointFeature
+    reference_point: PointFeature
+    area: AreaMetrics
+
+
 class SpatialSelection(BaseModel):
     """Canonical geometry record consumed by later spatial-query modules."""
 
@@ -48,6 +60,8 @@ class SpatialSelection(BaseModel):
     centroid: PointFeature
     reference_point: PointFeature
     area: AreaMetrics
+    plot_count: int = Field(default=0, ge=0)
+    plots: list[PlotRecord] = Field(default_factory=list)
     crs: Literal["EPSG:4326"] = "EPSG:4326"
     coordinate_order: Literal["longitude, latitude"] = "longitude, latitude"
     source: Literal["drawn", "imported"] = "drawn"
@@ -63,13 +77,28 @@ class SelectionResponse(BaseModel):
     centroid: PointFeature
     reference_point: PointFeature
     area: AreaMetrics
+    plot_count: int
+    plots: list[PlotRecord]
     crs: Literal["EPSG:4326"]
     coordinate_order: Literal["longitude, latitude"]
     created_at: datetime
 
     @classmethod
     def from_record(cls, record: SpatialSelection) -> "SelectionResponse":
-        return cls.model_validate(record.model_dump())
+        payload = record.model_dump()
+        if not payload["plots"]:
+            legacy_plot = PlotRecord(
+                plot_id=f"{record.selection_id}_plot_001",
+                plot_index=1,
+                geometry=record.geometry,
+                bbox=record.bbox,
+                centroid=record.centroid,
+                reference_point=record.reference_point,
+                area=record.area,
+            )
+            payload["plots"] = [legacy_plot.model_dump()]
+            payload["plot_count"] = 1
+        return cls.model_validate(payload)
 
 
 class ErrorDetail(BaseModel):

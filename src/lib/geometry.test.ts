@@ -1,6 +1,6 @@
 import type { Feature, Geometry } from "geojson";
 import { describe, expect, it } from "vitest";
-import { boundaryArea, boundaryFromSnapshot, parseCoordinateQuery } from "./geometry";
+import { boundaryArea, boundaryFromSnapshot, boundaryPlotAreas, parseCoordinateQuery } from "./geometry";
 
 const drawnFeature: Feature<Geometry> = {
   type: "Feature",
@@ -34,7 +34,7 @@ describe("drawn boundary helpers", () => {
       properties: { mode: "polygon", parentId: "farm-1" },
       geometry: { type: "Point", coordinates: [-112.15, 49.79] },
     };
-    expect(boundaryFromSnapshot([drawnFeature, handle])?.id).toBe("farm-1");
+    expect(boundaryFromSnapshot([drawnFeature, handle])?.geometry.type).toBe("Polygon");
   });
 
   it("accepts a closed freehand trace as the farm boundary", () => {
@@ -43,7 +43,27 @@ describe("drawn boundary helpers", () => {
       id: "farm-trace",
       properties: { mode: "freehand" },
     };
-    expect(boundaryFromSnapshot([tracedFeature])?.id).toBe("farm-trace");
+    expect(boundaryFromSnapshot([tracedFeature])?.geometry.type).toBe("Polygon");
+  });
+
+  it("combines separate Terra Draw plots into a MultiPolygon", () => {
+    const secondPlot: Feature<Geometry> = {
+      ...drawnFeature,
+      id: "farm-2",
+      geometry: {
+        type: "Polygon",
+        coordinates: [[
+          [-112.13, 49.79],
+          [-112.12, 49.79],
+          [-112.12, 49.78],
+          [-112.13, 49.78],
+          [-112.13, 49.79],
+        ]],
+      },
+    };
+    const boundary = boundaryFromSnapshot([drawnFeature, secondPlot]);
+    expect(boundary?.geometry.type).toBe("MultiPolygon");
+    expect(boundaryPlotAreas(boundary!)).toHaveLength(2);
   });
 });
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
@@ -68,6 +69,35 @@ def test_invalid_drawn_boundary_returns_actionable_error() -> None:
     assert error["code"] == "invalid_geometry"
     assert error["message"]
     assert error["hint"]
+
+
+def test_multiple_plots_are_saved_as_one_queryable_farm_selection() -> None:
+    geometry = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[-112.15, 49.79], [-112.145, 49.79], [-112.145, 49.785], [-112.15, 49.785], [-112.15, 49.79]]],
+            [[[-112.14, 49.78], [-112.135, 49.78], [-112.135, 49.775], [-112.14, 49.775], [-112.14, 49.78]]],
+        ],
+    }
+
+    response = client.post(
+        "/api/v1/selections",
+        json={"geometry": geometry, "source": "drawn", "label": "Miller Family Farm"},
+    )
+
+    assert response.status_code == 201
+    saved = response.json()
+    assert saved["geometry"]["type"] == "MultiPolygon"
+    assert saved["plot_count"] == 2
+    assert len(saved["plots"]) == 2
+    assert saved["plots"][0]["plot_id"].endswith("_plot_001")
+    assert saved["plots"][1]["plot_id"].endswith("_plot_002")
+    assert sum(plot["area"]["square_meters"] for plot in saved["plots"]) == pytest.approx(
+        saved["area"]["square_meters"], abs=1
+    )
+    fetched = client.get(f"/api/v1/selections/{saved['selection_id']}")
+    assert fetched.status_code == 200
+    assert fetched.json() == saved
 
 
 def test_missing_geometry_returns_consistent_error_envelope() -> None:

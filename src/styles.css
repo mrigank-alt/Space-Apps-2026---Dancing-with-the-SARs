@@ -156,6 +156,9 @@ button { color: inherit; }
 .trace-icon { color: var(--forest); font-family: Georgia, serif; font-size: 27px; font-weight: 900; line-height: 1; text-align: center; }
 .rectangle-icon { width: 20px; height: 16px; border: 2px solid var(--forest); display: block; margin-left: 2px; }
 .drawing-hint { margin-top: 8px; padding: 8px 10px; background: var(--forest); color: white; display: flex; align-items: center; gap: 8px; font-size: 9px; line-height: 1.35; }
+.plot-count-banner { display: grid; gap: 2px; margin-top: 8px; padding: 9px 10px; border: 1px solid #bfd0b8; background: #e9f3e3; }
+.plot-count-banner strong { color: #285a43; font-size: 9px; }
+.plot-count-banner span { color: #607568; font-size: 8px; line-height: 1.35; }
 .pulse { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 0 rgba(216,255,112,.55); animation: pulse 1.5s infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(216,255,112,0); } }
 .edit-actions { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 8px; border: 1px solid #d5dbd2; border-radius: 3px; overflow: hidden; }
@@ -177,6 +180,11 @@ button { color: inherit; }
 .area-card span { display: block; color: #a7b9b1; font-size: 7px; font-weight: 800; letter-spacing: .13em; }
 .area-card strong { display: block; margin-top: 5px; color: var(--lime); font-family: Georgia, serif; font-size: 19px; white-space: nowrap; }
 .area-card strong small { color: white; font: 700 8px ui-sans-serif, sans-serif; }
+.plot-area-list { max-height: 104px; overflow-y: auto; border: 1px solid #d5dbd2; border-top: 0; background: white; }
+.plot-area-list > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; border-top: 1px solid #e6e9e3; font-size: 8px; }
+.plot-area-list > div:first-child { border-top: 0; }
+.plot-area-list span { color: #65756d; }
+.plot-area-list strong { color: var(--forest); font-size: 8px; }
 .area-note { margin: 7px 0 0 !important; font-size: 8px !important; }
 .empty-review { display: flex; align-items: center; gap: 8px; color: #8e9993; padding: 10px; border: 1px dashed #cad1c8; font-size: 9px; }
 

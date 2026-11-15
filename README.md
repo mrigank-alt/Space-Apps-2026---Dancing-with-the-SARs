@@ -9,11 +9,11 @@ Iteration 1 of a groundwater-risk application for farmers. This repository conta
 - MapTiler place/address geocoding plus direct coordinate search
 - Browser geolocation with a permission prompt and rural demo locations
 - Satellite-first map with a familiar Map/Satellite switch and floating location control
-- Terra Draw polygon, freehand trace, and rectangle drawing, editing, undo, and clearing
-- Geodesic area display in acres and hectares
+- Terra Draw multi-plot polygon, freehand trace, and rectangle drawing, editing, undo, and clearing
+- Combined and per-plot geodesic area display in acres and hectares
 - FastAPI endpoint accepting GeoJSON `Polygon` and `MultiPolygon` geometry in EPSG:4326 longitude-latitude order
 - Coordinate, ring closure, validity, nonzero-area, and maximum-area validation
-- Named, persistent selections with normalized geometry, bounding box, centroid, interior reference point, area, and reusable selection ID
+- Named, persistent farm selections with normalized MultiPolygon geometry, combined spatial metadata, reusable selection ID, and stable per-plot IDs and measurements
 - Frontend geometry tests, backend validation tests, and a drawing-to-API integration test
 
 Selections are stored in `backend/data/selections.sqlite3`. The database keeps the canonical GeoJSON record and an SQLite R-tree bounding-box index for later candidate-scene and environmental-record queries. The repository interface can be replaced with PostGIS for a multi-user production deployment without changing the service layer.
@@ -102,6 +102,18 @@ Representative response (the ID and timestamp vary):
   "centroid": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-112.145, 49.785]}, "properties": {"method": "geometric centroid"}},
   "reference_point": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-112.145, 49.785]}, "properties": {"method": "point guaranteed to lie within the selection"}},
   "area": {"square_meters": 800985.986, "hectares": 80.098599, "acres": 197.927948},
+  "plot_count": 1,
+  "plots": [
+    {
+      "plot_id": "sel_…_plot_001",
+      "plot_index": 1,
+      "geometry": {"type": "Polygon", "coordinates": ["…"]},
+      "bbox": [-112.15, 49.78, -112.14, 49.79],
+      "centroid": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-112.145, 49.785]}, "properties": {"method": "geometric centroid"}},
+      "reference_point": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-112.145, 49.785]}, "properties": {"method": "point guaranteed to lie within the selection"}},
+      "area": {"square_meters": 800985.986, "hectares": 80.098599, "acres": 197.927948}
+    }
+  ],
   "crs": "EPSG:4326",
   "coordinate_order": "longitude, latitude",
   "created_at": "2026-11-15T00:00:00Z"

@@ -32,6 +32,20 @@ export interface SelectionResponse {
     hectares: number;
     acres: number;
   };
+  plot_count: number;
+  plots: Array<{
+    plot_id: string;
+    plot_index: number;
+    geometry: Polygon;
+    bbox: [number, number, number, number];
+    centroid: Feature<Point>;
+    reference_point: Feature<Point>;
+    area: {
+      square_meters: number;
+      hectares: number;
+      acres: number;
+    };
+  }>;
   crs: "EPSG:4326";
   coordinate_order: "longitude, latitude";
   created_at: string;

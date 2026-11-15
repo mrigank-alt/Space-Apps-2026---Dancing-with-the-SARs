@@ -1,5 +1,5 @@
 import area from "@turf/area";
-import type { Feature, Geometry, Polygon } from "geojson";
+import type { Feature, Geometry, MultiPolygon, Polygon } from "geojson";
 import type { AreaSummary, BoundaryFeature } from "../types";
 
 const SQUARE_METERS_PER_ACRE = 4046.8564224;
@@ -17,20 +17,38 @@ export function boundaryArea(feature: BoundaryFeature): AreaSummary {
 export function boundaryFromSnapshot(
   features: Array<Feature<Geometry>>,
 ): BoundaryFeature | null {
-  const parent = [...features].reverse().find((feature) => {
+  const plots = features.filter((feature): feature is Feature<Polygon> => {
     if (feature.geometry.type !== "Polygon") return false;
     const mode = feature.properties?.mode;
     return mode === "polygon" || mode === "freehand" || mode === "rectangle";
   });
 
-  if (!parent || parent.geometry.type !== "Polygon") return null;
+  if (plots.length === 0) return null;
+
+  const geometry: Polygon | MultiPolygon = plots.length === 1
+    ? plots[0].geometry
+    : {
+        type: "MultiPolygon",
+        coordinates: plots.map((plot) => plot.geometry.coordinates),
+      };
 
   return {
     type: "Feature",
-    id: parent.id,
     properties: {},
-    geometry: parent.geometry as Polygon,
+    geometry,
   };
+}
+
+export function boundaryPlotAreas(feature: BoundaryFeature): AreaSummary[] {
+  const polygons = feature.geometry.type === "Polygon"
+    ? [feature.geometry.coordinates]
+    : feature.geometry.coordinates;
+
+  return polygons.map((coordinates) => boundaryArea({
+    type: "Feature",
+    properties: {},
+    geometry: { type: "Polygon", coordinates },
+  }));
 }
 
 export function formatArea(value: number): string {
