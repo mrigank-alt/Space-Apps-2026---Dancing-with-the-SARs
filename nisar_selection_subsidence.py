@@ -71,7 +71,8 @@ REFERENCE_INNER_KM, REFERENCE_OUTER_KM = 15.0, 25.0
 COHERENCE_MIN = 0.40
 MULTILOOK = 4                    # 80 m samples -> about 320 m products
 MIN_VALID_FRACTION = 0.20        # min fraction of multilooked pixels that must be valid per pair
-MIN_PIXELS_PER_ZONE = 25
+MIN_TARGET_PIXELS = 3            # allow small farms while still requiring multiple independent samples
+MIN_REFERENCE_PIXELS = 25        # reference/ramp support remains deliberately conservative
 MIN_PAIRS_PER_PIXEL = 3
 MIN_HOTSPOT_PIXELS = 15          # ~1.5 km^2 at 320 m posting
 MIN_SIGNAL_CM_YR = 3.0
@@ -91,7 +92,7 @@ PAIR_REJECT_FACTOR = 3.0         # drop a pair whose residual scatter > this x m
 STRONG_AREA_FACTOR = 3.0         # "strong candidate": area >= this x MIN_HOTSPOT_PIXELS ...
 STRONG_SIGNAL_FACTOR = 1.25      # ... and |mean anomaly| >= this x detection threshold (screening aid only)
 MAX_WORKERS = 40                 # cold run: all Harmony jobs in flight at once (server-side latency dominates)
-CACHE_VERSION = "v3"             # prepared-array cache; incidence angle remains optional when not available
+CACHE_VERSION = "v4"             # v4 separates small-farm and exterior-reference support thresholds
 RAW_CACHE_VERSION = "v2"         # preserve reusable phase/coherence clips; Harmony does not expose the 3-D angle cube as a coverage
 SELECTION_GEOMETRY = None
 
@@ -441,7 +442,8 @@ class Fetcher:
         geometry_key = hashlib.sha1(json.dumps(SELECTION_GEOMETRY, sort_keys=True).encode()).hexdigest() if SELECTION_GEOMETRY else "city"
         params = (CACHE_VERSION, geometry_key, item["name"], item["pol"], tuple(round(v, 6) for v in spec["bbox"]),
                   tuple(spec["center"]), COHERENCE_MIN, MULTILOOK, COH_WEIGHT_CAP, TARGET_RADIUS_KM,
-                  REFERENCE_INNER_KM, REFERENCE_OUTER_KM, MIN_VALID_FRACTION, MIN_PIXELS_PER_ZONE, self.opts.use_cc)
+                  REFERENCE_INNER_KM, REFERENCE_OUTER_KM, MIN_VALID_FRACTION,
+                  MIN_TARGET_PIXELS, MIN_REFERENCE_PIXELS, self.opts.use_cc)
         return self.cache_dir / f"prep_{hashlib.sha1(repr(params).encode()).hexdigest()[:20]}.npz"
 
     def is_cached(self, item, spec):
@@ -484,8 +486,13 @@ class Fetcher:
         try:
             with np.load(path, allow_pickle=False) as z:
                 cc = z["cc"] if z["cc"].size else None
+                incidence = (
+                    z["incidence"]
+                    if "incidence" in z.files and z["incidence"].size
+                    else None
+                )
                 return {"phase": z["phase"], "coh": z["coh"], "cc": cc if self.opts.use_cc else None,
-                        "incidence": z["incidence"] if "incidence" in z.files else None,
+                        "incidence": incidence,
                         "tf": tuple(float(v) for v in z["tf"]), "crs": str(z["crs"])}
         except Exception as exc:  # corrupt/partial cache entry -> refetch
             print(f"  cache entry unreadable ({type(exc).__name__}); refetching")
@@ -590,8 +597,10 @@ def _prepare_pair(clip, spec):
     if vfrac < MIN_VALID_FRACTION:
         return {"skip": f"valid fraction {vfrac:.2f} < {MIN_VALID_FRACTION}"}
     tml, rml = _zone_masks(ph_ml.shape, tf_ml, crs, spec["center"])
-    if (finite & tml).sum() < MIN_PIXELS_PER_ZONE or (finite & rml).sum() < MIN_PIXELS_PER_ZONE:
-        return {"skip": "too few coherent pixels in target/reference zones"}
+    if (finite & tml).sum() < MIN_TARGET_PIXELS:
+        return {"skip": "too few coherent pixels in the selected farm"}
+    if (finite & rml).sum() < MIN_REFERENCE_PIXELS:
+        return {"skip": "too few coherent pixels in the exterior reference area"}
     incidence = clip.get("incidence")
     inc_ml = _block_mean(incidence, MULTILOOK) if incidence is not None else None
     return {"ph": ph_ml.astype(np.float32), "coh": coh_ml.astype(np.float32), "incidence": inc_ml,
@@ -646,7 +655,7 @@ def _detrend_stack(PH, COH, rml, exclude, sign, *, reference_only=False, remove_
                 continue
         clean = ph - ramp
         ref = clean[rml & usable & np.isfinite(clean)]
-        if ref.size < MIN_PIXELS_PER_ZONE:
+        if ref.size < MIN_REFERENCE_PIXELS:
             continue
         Y[i] = (clean - np.median(ref)) * scale
     return Y

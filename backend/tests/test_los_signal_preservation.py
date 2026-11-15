@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 import numpy as np
@@ -78,6 +79,47 @@ class LosSignalPreservationTests(unittest.TestCase):
                      np.zeros(self.target.shape, bool), 1.0,
                      reference_only=True, remove_ramp=False)
         np.testing.assert_allclose(actual[0, self.target], 0, atol=1e-5)
+
+    def test_small_farm_is_not_rejected_when_reference_support_is_strong(self):
+        phase = np.ones((40, 40), dtype=np.float32)
+        coherence = np.full_like(phase, 0.9)
+        connected = np.ones_like(phase, dtype=np.int32)
+        original_zone_masks = source._zone_masks
+
+        def small_target_with_large_reference(shape, transform, crs, center):
+            target = np.zeros(shape, dtype=bool)
+            target[:2, :2] = True
+            reference = ~target
+            return target, reference
+
+        source._zone_masks = small_target_with_large_reference
+        try:
+            prepared = source._prepare_pair(
+                {"phase": phase, "coh": coherence, "cc": connected,
+                 "incidence": None, "tf": (1, 0, 0, 0, -1, 40), "crs": "EPSG:4326"},
+                {"center": (0, 0)},
+            )
+        finally:
+            source._zone_masks = original_zone_masks
+        self.assertNotIn("skip", prepared)
+
+    def test_empty_cached_incidence_layer_is_treated_as_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            path = cache / "cached.npz"
+            np.savez_compressed(
+                path,
+                phase=np.ones((4, 4), dtype=np.float32),
+                coh=np.ones((4, 4), dtype=np.float32),
+                cc=np.zeros(0, dtype=np.int32),
+                incidence=np.zeros(0, dtype=np.float32),
+                tf=np.array((1, 0, 0, 0, -1, 4), dtype=np.float64),
+                crs=np.array("EPSG:4326"),
+            )
+            fetcher = source.Fetcher(cache, source.RunOptions())
+            loaded = fetcher._load_cache(path)
+        self.assertIsNotNone(loaded)
+        self.assertIsNone(loaded["incidence"])
 
     def test_sbas_recovers_signed_four_cm_over_actual_interval(self):
         days = np.array([0, 12, 36, 48, 72, 84, 96, 108, 132, 144.0])
