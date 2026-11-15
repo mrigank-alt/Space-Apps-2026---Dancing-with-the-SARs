@@ -1,4 +1,61 @@
-# Groundsignal — farm boundary selection
+# Groundsignal - Rafsanjan simulation demo
+
+Based on `main`. Heatmap values, the 4.2 cm peak, time progression, and alert bands
+are explicitly simulated. No satellite observations or measured groundwater data
+are loaded. This demo does not run the SBAS engine.
+
+## Run without installing dependencies
+
+From the repository root:
+
+```powershell
+python -m http.server 5173 --bind 127.0.0.1 --directory public
+```
+
+Open http://127.0.0.1:5173/rafsanjan-demo.html, or run `./start-demo.ps1`.
+The regular `pnpm install` and `pnpm dev` workflow also shows this experience
+through the React entry. The demo and downloads do not require FastAPI.
+
+Choose **Draw a polygon**, click corners, and press Enter or **Finish polygon**.
+Undo removes the last corner; Escape cancels. **Try sample field** loads an
+illustrative boundary. Every corner must lie inside the approximate study window:
+55.65-56.35 E, 30.10-30.70 N. This is not a verified city, farmland or aquifer
+boundary. The actual drawn geometry can be exported as GeoJSON. A separate CSV
+exports synthetic sample values. Both exports carry simulation metadata.
+
+## What the numbers mean
+
+The deterministic synthetic surface is normalized to a chosen **4.2 cm maximum
+inside each selection**. It is not a spatial measurement model. The June 23 to
+October 21, 2026 slider shows linear illustrative progression. Alert cutoffs at
+1.4 and 2.8 cm are arbitrary demo bands, not validated hazard or pumping limits.
+Farmer actions prioritize checking wells, irrigation infrastructure, metered
+extraction and local water-manager guidance rather than automatic pumping bans.
+
+The optional water-budget scenario divides assumed usable storage by annual
+pumping minus recharge. Inputs and outputs are hypothetical and unrelated to the
+selected polygon or Rafsanjan measurements. It does not predict actual aquifer
+depletion, well failure, a safe operating date, or when land will finish sinking.
+There is no calibrated compaction model or defined 'full depression' threshold.
+
+Basemaps use MapLibre from a pinned CDN and OpenStreetMap / EOX tiles. EOX 2025
+imagery is CC BY-NC-SA and for non-commercial prototype use. Basemap imagery is
+not the source of displacement values. If external resources fail, drawing and
+exports remain available on a labeled coordinate grid. No API keys are embedded;
+the demo itself does not send selected polygons to a server or persist them.
+
+## Tests
+
+```powershell
+node --test tests/demo-model.test.mjs
+```
+
+Eight geometry, simulation, export-provenance, timeline and water-budget tests
+passed. Browser checks covered manual polygon drawing, synthetic heatmap and
+alerts, time slider, and scenario input validation. Full Vite build validation
+was unavailable because dependency installation was blocked.
+
+## Original boundary workflow and backend reference
 
 Iteration 1 of a groundwater-risk application for farmers. This repository contains only the reusable location-search and farm-boundary confirmation workflow. It does **not** retrieve NISAR data, calculate groundwater risk, predict groundwater conditions, or make pumping recommendations.
 

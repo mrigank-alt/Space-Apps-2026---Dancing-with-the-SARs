@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Groundsignal Rafsanjan simulation: select farmland, explore illustrative land sinkage, and compare hypothetical groundwater budgets.">
+  <title>Groundsignal | Rafsanjan simulation</title>
+  <link rel="stylesheet" href="rafsanjan-demo.css">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.15.0/dist/maplibre-gl.css">
+</head>
+<body>
+<header class="header"><a class="brand" href="rafsanjan-demo.html" aria-label="Groundsignal home"><span class="brand-icon">◎</span><span><strong>Groundsignal</strong><small>THE GROUND BENEATH YOUR FARM</small></span></a><div class="header-place"><span class="live-dot"></span> RAFSANJAN, IRAN <span class="divider">/</span> FIELD EXPLORER</div><span class="demo-pill">SIMULATED DEMO</span></header>
+<div class="notice"><strong>Illustrative data.</strong> Heatmap, 4.2 cm peak, progression and alert thresholds are simulated. No satellite observations or measured groundwater data are loaded.</div>
+<main class="workspace">
+  <aside class="panel">
+    <div class="intro"><span class="eyebrow">01 / CHOOSE YOUR LAND</span><h1>Small changes.<br>Big consequences.</h1><p>Draw your farmland around Rafsanjan. Explore how land sinkage could become a useful early warning.</p></div>
+    <div class="location-card"><span class="pin">⌖</span><div><strong>Rafsanjan agricultural area</strong><small>30.4006° N, 55.9871° E · Iran</small></div><button id="recenter" class="icon-button" title="Return to Rafsanjan" aria-label="Return to Rafsanjan">↗</button></div>
+    <p class="fine">Selection is limited to the outlined demo window. It is not an official city or aquifer boundary.</p>
+    <div class="draw-actions"><button id="draw" class="primary">＋ Draw a polygon</button><button id="example" class="secondary">Try sample field</button></div>
+    <div class="edit-actions"><button id="undo" disabled>↶ Undo corner</button><button id="finish" disabled>Finish polygon</button><button id="clear" disabled>Clear</button></div>
+    <p id="selection-status" class="status" role="status" aria-live="polite">Click “Draw a polygon”, then mark each corner. Finish with Enter or the button.</p>
+    <div id="selection-error" class="error" role="alert" hidden></div>
+    <div class="selection-metrics"><div><span>SELECTED AREA</span><strong id="area">— <small>ha</small></strong></div><div><span>BOUNDARY</span><strong id="corners">— <small>corners</small></strong></div></div>
+    <button id="export" class="export" disabled>Download boundary GeoJSON <span>↓</span></button>
+    <section class="analysis" id="analysis" hidden>
+      <div class="section-title"><span class="eyebrow">02 / READ THE PATTERN</span><span class="tiny-badge">SIMULATION</span></div>
+      <div class="peak-card"><span>PEAK SIMULATED LAND SINKAGE</span><div><strong id="peak">4.2</strong><b>cm</b><span class="trend">↓ relative change</span></div><p id="measurement-period">23 Jun – 21 Oct 2026 · 120 days</p></div>
+      <div class="mini-metrics"><div><strong id="average">—</strong><span>mean simulated cm</span></div><div><strong id="high-fraction">—</strong><span>grid samples ≥ 2.8 cm</span></div></div>
+      <p class="fine">The 4.2 cm peak is a chosen demo input, not a Rafsanjan measurement. This illustration is not a validated LOS or vertical product.</p>
+      <div class="section-title"><span class="eyebrow">03 / PRIORITIZE A CHECK</span><span id="alert-count" class="tiny-badge">3 DEMO ZONES</span></div>
+      <div id="alerts" class="alerts" aria-live="polite"></div>
+      <div class="action-note"><strong>Before changing pumping</strong><p>Confirm the pattern against well levels, metered pumping, validated deformation and local water-authority guidance. Low movement does not mean plentiful groundwater.</p></div>
+      <button id="export-grid" class="export">Download simulated grid CSV <span>↓</span></button>
+    </section>
+    <section class="water-panel">
+      <div class="section-title"><span class="eyebrow">04 / EXPLORE YOUR OPTIONS</span><span class="tiny-badge">WHAT IF?</span></div>
+      <h2>A water budget, not a countdown.</h2><p>Land sinkage cannot tell us how much water remains. Explore a separate, hypothetical storage-and-pumping scenario.</p>
+      <label class="scenario-toggle"><input id="scenario-enabled" type="checkbox"> Use illustrative water-budget inputs</label>
+      <div id="scenario" hidden>
+        <p class="scenario-warning">All values below are hypothetical. They are unrelated to your polygon or Rafsanjan aquifer measurements.</p>
+        <label class="number-field">Assumed usable storage <span>million m³</span><input id="storage" type="number" min="0.01" step="0.1" value="12"></label>
+        <label class="number-field">Assumed annual pumping <span>million m³/year</span><input id="pumping" type="number" min="0" step="0.1" value="2.4"></label>
+        <label class="number-field">Assumed annual recharge <span>million m³/year</span><input id="recharge" type="number" min="0" step="0.1" value="0.6"></label>
+        <label class="reduction-label" for="reduction">What if pumping fell by <strong id="reduction-label">20%</strong>?</label><input id="reduction" type="range" min="0" max="80" step="5" value="20">
+        <div id="scenario-error" class="error" role="alert" hidden></div>
+        <div class="horizon-grid"><div><span>BASELINE SCENARIO</span><strong id="baseline-years">—</strong><small>years to assumed storage exhaustion</small></div><div><span>REDUCED PUMPING</span><strong id="reduced-years">—</strong><small>years to assumed storage exhaustion</small></div></div>
+        <p class="fine">Storage ÷ (pumping − recharge). Constant flows, one shared accounting area, no lateral flows or climate changes. This is not a well-failure date or safe pumping limit.</p>
+      </div>
+      <div class="unknown"><span>WHEN WILL THE LAND FINISH SINKING?</span><strong>Cannot be estimated</strong><p>No defined “full depression” threshold or calibrated compaction model is available.</p></div>
+    </section>
+    <details class="methods"><summary>Data & methods</summary><p>Boundary: drawn by you in longitude/latitude (EPSG:4326). Study window: 55.65–56.35° E, 30.10–30.70° N. Heatmap: deterministic synthetic surface normalized to 4.2 cm inside each selection. Timeline: linear illustrative progression. Alert bands: arbitrary demo thresholds of 1.4 and 2.8 cm, not calibrated risk levels.</p><p>Basemap: OpenStreetMap or EOX Sentinel-2 imagery, when available. Basemap imagery is not the source of the simulated displacement.</p><p><a href="https://www.usgs.gov/water-science-school/science/land-subsidence" target="_blank" rel="noreferrer">USGS: land subsidence</a> · <a href="https://www.usgs.gov/water-science-school/science/groundwater-decline-and-depletion" target="_blank" rel="noreferrer">USGS: groundwater decline</a></p></details>
+    <footer>GROUNDSIGNAL / SPACE APPS PROTOTYPE<br><span>A conversation starter. Not an operational advisory.</span></footer>
+  </aside>
+  <section class="map-stage" id="map-stage" aria-label="Rafsanjan polygon selection map" tabindex="0">
+    <div id="basemap" aria-hidden="true"></div><div class="map-grid" id="map-grid"></div>
+    <svg id="overlay" role="img" aria-label="Selected boundary and simulated land sinkage overlay"></svg>
+    <div class="map-top"><span class="map-label">RAFSANJAN BASIN <small>APPROXIMATE STUDY WINDOW</small></span><div class="basemap-switch"><button id="map-button" aria-pressed="true">Map</button><button id="satellite-button" aria-pressed="false">Satellite</button></div></div>
+    <div class="map-placeholder" id="map-placeholder"><span>⌖</span><strong>Your field. A clearer picture.</strong><p>Draw a polygon or load the sample field.<br>The heatmap appears only inside your selection.</p></div>
+    <div class="map-mode" id="map-mode">POLYGON SELECTION · RAFSANJAN ONLY</div>
+    <div class="map-watermark">SIMULATED DISPLACEMENT · NOT MEASURED</div>
+    <div class="map-notification" id="map-notification" role="status">Loading basemap. Drawing also works on the coordinate grid.</div>
+    <div class="legend"><span>SIMULATED LAND SINKAGE</span><div class="legend-ramp"></div><div class="legend-ticks"><b>0 cm</b><b>1.4</b><b>2.8</b><b>4.2 cm</b></div><small>Color bands are illustrative, not validated risk.</small></div>
+    <div class="timeline"><div class="timeline-top"><span>ILLUSTRATIVE PROGRESSION</span><strong id="selected-date">21 OCT 2026</strong><button id="play" aria-label="Play simulated progression" disabled>▶ Play</button></div><label class="sr-only" for="time">Day in simulated interval</label><input id="time" type="range" min="0" max="120" value="120" disabled><div class="timeline-dates"><span>23 JUN 2026</span><span>120 DAYS · LINEAR SIMULATION</span><span>21 OCT 2026</span></div></div>
+  </section>
+</main>
+<script type="module" src="demo-ui.mjs"></script>
+</body></html>
