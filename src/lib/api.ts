@@ -59,6 +59,14 @@ export async function getProcessingRun(runId: string): Promise<ProcessingRun> {
   return (await response.json()) as ProcessingRun;
 }
 
+export async function listProcessingRuns(selectionId: string): Promise<ProcessingRun[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/selections/${selectionId}/processing-runs`,
+  );
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as ProcessingRun[];
+}
+
 export async function getSelection(selectionId: string): Promise<SelectionResponse> {
   const response = await fetch(`${API_BASE_URL}/api/v1/selections/${selectionId}`);
   if (!response.ok) throw await responseError(response);

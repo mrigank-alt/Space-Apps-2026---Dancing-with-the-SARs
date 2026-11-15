@@ -3,7 +3,7 @@ import { FarmMap, type FarmMapHandle } from "./components/FarmMap";
 import { AssessmentPanel } from "./components/AssessmentPanel";
 import { FarmProfileForm, type FarmFormValues } from "./components/FarmProfileForm";
 import { LocationSearch } from "./components/LocationSearch";
-import { createSelection, getAssessment, getGunwAvailability, getProcessingRun, getSelection, listAssessments, startProcessing } from "./lib/api";
+import { createSelection, getAssessment, getGunwAvailability, getProcessingRun, getSelection, listAssessments, listProcessingRuns, startProcessing } from "./lib/api";
 import { getMapConfiguration } from "./lib/config";
 import { boundaryArea, boundaryPlotAreas, formatArea } from "./lib/geometry";
 import type {
@@ -74,9 +74,13 @@ export default function App() {
       try {
         const saved = await getSelection(selectionId);
         setConfirmed(saved);
-        const history = await listAssessments(selectionId);
+        const [history, runs] = await Promise.all([
+          listAssessments(selectionId),
+          listProcessingRuns(selectionId),
+        ]);
         setAssessmentHistory(history);
         setAssessment(history[0] ?? null);
+        setProcessingRun(runs[0] ?? null);
       } catch {
         window.localStorage.removeItem(LAST_SELECTION_KEY);
       }
