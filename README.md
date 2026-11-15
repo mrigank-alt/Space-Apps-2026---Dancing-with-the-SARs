@@ -1,98 +1,111 @@
-# vinext-starter
+# Groundsignal — farm boundary selection
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Iteration 1 of a groundwater-risk application for farmers. This repository contains only the reusable location-search and farm-boundary confirmation workflow. It does **not** retrieve NISAR data, calculate groundwater risk, predict groundwater conditions, or make pumping recommendations.
+
+## What is included
+
+- React, TypeScript, and Vite frontend
+- MapLibre GL JS map with a configurable imagery provider
+- MapTiler place/address geocoding plus direct coordinate search
+- Browser geolocation with a permission prompt and rural demo locations
+- Satellite-first map with a familiar Map/Satellite switch and floating location control
+- Terra Draw polygon, freehand trace, and rectangle drawing, editing, undo, and clearing
+- Geodesic area display in acres and hectares
+- FastAPI endpoint accepting GeoJSON `Polygon` and `MultiPolygon` geometry in EPSG:4326 longitude-latitude order
+- Coordinate, ring closure, validity, nonzero-area, and maximum-area validation
+- Named, persistent selections with normalized geometry, bounding box, centroid, interior reference point, area, and reusable selection ID
+- Frontend geometry tests, backend validation tests, and a drawing-to-API integration test
+
+Selections are stored in `backend/data/selections.sqlite3`. The database keeps the canonical GeoJSON record and an SQLite R-tree bounding-box index for later candidate-scene and environmental-record queries. The repository interface can be replaced with PostGIS for a multi-user production deployment without changing the service layer.
 
 ## Prerequisites
 
-- Node.js `>=22.13.0`
+- Node.js 22.13 or newer and pnpm 11
+- Python 3.11 or newer
+- A browser-safe, domain-restricted MapTiler key for address/place search and the default satellite style
 
-## Quick Start
+The application still works without a MapTiler key: it uses an EOxCloudless Sentinel-2 satellite demo with an OpenStreetMap reference overlay, an OpenStreetMap map view, Photon search-as-you-type suggestions, submitted Nominatim searches, coordinates, geolocation, and explicitly labeled demo locations. The 2025 EOxCloudless layer is CC BY-NC-SA and therefore for non-commercial prototype use only. Configure licensed production imagery and geocoding providers before deployment.
+
+## Configuration
 
 ```bash
-npm install
-npm run dev
-npm run build
+cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
-This starter does not use `wrangler.jsonc`.
+Set `VITE_MAPTILER_API_KEY` in `.env`. It must be a browser-safe public key restricted to the application's domains, never a private service credential.
 
-## Included Shape
+When that key is blank, type-ahead suggestions use `VITE_AUTOCOMPLETE_GEOCODER_URL`, which defaults to Photon’s public demo. Submitted fallback searches use `VITE_FALLBACK_GEOCODER_URL`. The Nominatim fallback is deliberately submit-only, cached for the session, rate-limited, and attributed; it is never used for autocomplete. Point both settings to services you operate or configure MapTiler before production use.
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+To use another licensed imagery provider, set either:
 
-## Workspace Auth Headers
+- `VITE_MAP_STYLE_URL` to a MapLibre style URL (use `{key}` as the API-key placeholder), or
+- `VITE_SATELLITE_TILE_URL`, `VITE_BASEMAP_ATTRIBUTION`, and optionally `VITE_BASEMAP_NAME` for raster XYZ tiles.
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+The map always displays provider attribution. Confirm that the configured provider's terms permit this use.
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+Backend limits can be changed with `MAX_SELECTION_AREA_HECTARES`, `MIN_SELECTION_AREA_SQUARE_METERS`, and `CORS_ORIGINS`. `SELECTION_DATABASE_PATH` controls the persistent SQLite database location. Defaults are documented in the example environment files.
 
-Treat the full name as optional and fall back to email when it is absent:
+## Start locally
 
-```tsx
-import { headers } from "next/headers";
+Install dependencies once:
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+```bash
+pnpm install
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt
+```
 
-  const displayName = fullName ?? email;
-  // ...
+Start the backend from the repository root:
+
+```bash
+backend/.venv/bin/uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000 --env-file backend/.env
+```
+
+In a second terminal, start the frontend:
+
+```bash
+pnpm dev
+```
+
+Open `http://127.0.0.1:5173`. Vite proxies `/api` and `/health` to the backend. Interactive API documentation is at `http://127.0.0.1:8000/docs`.
+
+## Tests and build
+
+```bash
+pnpm test:all
+pnpm lint
+pnpm build
+```
+
+## API example
+
+Request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/selections \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"South pivot field","source":"drawn","geometry":{"type":"Polygon","coordinates":[[[-112.15,49.79],[-112.14,49.79],[-112.14,49.78],[-112.15,49.78],[-112.15,49.79]]]}}'
+```
+
+Representative response (the ID and timestamp vary):
+
+```json
+{
+  "selection_id": "sel_…",
+  "label": "South pivot field",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[-112.15, 49.79], [-112.15, 49.78], [-112.14, 49.78], [-112.14, 49.79], [-112.15, 49.79]]]
+  },
+  "bbox": [-112.15, 49.78, -112.14, 49.79],
+  "centroid": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-112.145, 49.785]}, "properties": {"method": "geometric centroid"}},
+  "reference_point": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-112.145, 49.785]}, "properties": {"method": "point guaranteed to lie within the selection"}},
+  "area": {"square_meters": 800985.986, "hectares": 80.098599, "acres": 197.927948},
+  "crs": "EPSG:4326",
+  "coordinate_order": "longitude, latitude",
+  "created_at": "2026-11-15T00:00:00Z"
 }
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+Search results only reposition the map and place a reference marker. They are never submitted as the farm boundary; the farmer must draw and explicitly confirm the land selection.

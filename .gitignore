@@ -28,8 +28,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# environment files (examples are safe to commit)
 .env*
+!.env.example
+!backend/.env.example
 
 # vercel
 .vercel
@@ -40,3 +42,9 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+backend/.venv/
+backend/data/*.sqlite3
+backend/data/*.sqlite3-shm
+backend/data/*.sqlite3-wal
+backend/**/__pycache__/
+.pytest_cache/
