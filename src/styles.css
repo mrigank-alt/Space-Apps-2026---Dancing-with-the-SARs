@@ -256,6 +256,7 @@ button { color: inherit; }
 .processing-panel { margin-top: 10px; }
 .prepare-results-button { width: 100%; padding: 10px; border: 0; border-radius: 3px; background: var(--forest); color: white; font: inherit; font-size: 8px; font-weight: 800; cursor: pointer; }
 .prepare-results-button:hover { background: #205a45; }
+.prepare-results-button.retry { margin-top: 8px; }
 .processing-status { padding: 10px; border: 1px solid #afc7b2; background: rgba(255,255,255,.72); }
 .processing-status strong { color: var(--forest); font-size: 9px; }
 .processing-status p { margin: 5px 0 0; color: #4d6258; font-size: 8px; line-height: 1.4; }

@@ -442,6 +442,11 @@ export default function App() {
                         {processingRun.status === "completed" && processingRun.result_summary?.pair_count != null && (
                           <small>{processingRun.result_summary.pair_count} image pairs were processed for this farm.</small>
                         )}
+                        {["credentials_required", "failed", "no_data"].includes(processingRun.status) && (
+                          <button type="button" className="prepare-results-button retry" onClick={prepareSatelliteResults}>
+                            Try analysis again
+                          </button>
+                        )}
                       </div>
                     )}
                     {processingError && <div className="submit-error" role="alert">{processingError}</div>}
