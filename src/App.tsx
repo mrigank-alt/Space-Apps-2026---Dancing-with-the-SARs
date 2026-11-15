@@ -6,6 +6,7 @@ import { LocationSearch } from "./components/LocationSearch";
 import { createSelection, getAssessment, getGunwAvailability, getProcessingRun, getSelection, listAssessments, listProcessingRuns, startProcessing } from "./lib/api";
 import { getMapConfiguration } from "./lib/config";
 import { boundaryArea, boundaryPlotAreas, formatArea } from "./lib/geometry";
+import { PRESENTATION_DEMO_ASSESSMENT, PRESENTATION_DEMO_LOCATION, PRESENTATION_DEMO_SELECTION } from "./lib/presentationDemo";
 import type {
   Assessment,
   BoundaryFeature,
@@ -37,6 +38,7 @@ export default function App() {
   const [assessmentHistory, setAssessmentHistory] = useState<Assessment[]>([]);
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [selectedZone, setSelectedZone] = useState<ConcernZoneProperties | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const [farmForm, setFarmForm] = useState<FarmFormValues>({
     farmName: "",
     operatorName: "",
@@ -67,7 +69,12 @@ export default function App() {
   }, [confirmed]);
 
   useEffect(() => {
-    const selectionId = new URLSearchParams(window.location.search).get("selection")
+    const parameters = new URLSearchParams(window.location.search);
+    if (parameters.get("demo") === "1") {
+      loadPresentationDemo();
+      return;
+    }
+    const selectionId = parameters.get("selection")
       || window.localStorage.getItem(LAST_SELECTION_KEY);
     if (!selectionId) return;
     void (async () => {
@@ -247,6 +254,7 @@ export default function App() {
     setAssessmentHistory([]);
     setSelectedPlotId(null);
     setSelectedZone(null);
+    setDemoMode(false);
     window.localStorage.removeItem(LAST_SELECTION_KEY);
     window.history.replaceState({}, "", window.location.pathname);
     setProcessingError(undefined);
@@ -263,6 +271,26 @@ export default function App() {
     setActiveTool("idle");
   }
 
+  function loadPresentationDemo() {
+    setDemoMode(true);
+    setConfirmed(PRESENTATION_DEMO_SELECTION);
+    setAssessment(PRESENTATION_DEMO_ASSESSMENT);
+    setAssessmentHistory([PRESENTATION_DEMO_ASSESSMENT]);
+    setProcessingRun(null);
+    setProcessingError(undefined);
+    setSelectedPlotId(null);
+    setSelectedZone(null);
+    setLocation(PRESENTATION_DEMO_LOCATION);
+    window.history.replaceState({}, "", "?demo=1");
+  }
+
+  function exitPresentationDemo() {
+    const savedSelection = window.localStorage.getItem(LAST_SELECTION_KEY);
+    window.location.href = savedSelection
+      ? `?selection=${encodeURIComponent(savedSelection)}`
+      : window.location.pathname;
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -273,9 +301,14 @@ export default function App() {
             <small>{confirmed ? "Farm monitoring" : "Farm setup"}</small>
           </div>
         </div>
-        <div className="product-status">
-          <span />
-          {confirmed ? "FARM MONITORING" : "FARM SETUP"}
+        <div className="header-actions">
+          <button type="button" className="demo-button" onClick={demoMode ? exitPresentationDemo : loadPresentationDemo}>
+            {demoMode ? "Exit demo" : "Instant presentation demo"}
+          </button>
+          <div className="product-status">
+            <span />
+            {demoMode ? "SIMULATED DEMO" : confirmed ? "FARM MONITORING" : "FARM SETUP"}
+          </div>
         </div>
       </header>
 

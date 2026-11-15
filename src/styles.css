@@ -122,6 +122,12 @@ button { color: inherit; }
   letter-spacing: .14em;
 }
 .product-status span { width: 7px; height: 7px; border-radius: 50%; background: #4e8f67; box-shadow: 0 0 0 4px #e1efdf; }
+.header-actions { display: flex; align-items: center; gap: 16px; }
+.demo-button { padding: 8px 11px; border: 1px solid #8ba296; border-radius: 4px; background: #fff; color: var(--forest); font-size: 9px; font-weight: 850; cursor: pointer; }
+.demo-button:hover { background: #eef5ea; border-color: #4e7b65; }
+.demo-disclaimer { display: grid; gap: 3px; margin-bottom: 12px; padding: 11px 12px; border: 1px solid #d39a32; background: #fff3d5; color: #583f11; }
+.demo-disclaimer strong { font-size: 11px; }
+.demo-disclaimer span { font-size: 9px; line-height: 1.4; }
 
 .workspace { display: grid; grid-template-columns: 420px minmax(0, 1fr); min-height: 0; }
 .side-panel {
@@ -404,6 +410,8 @@ button { color: inherit; }
   .app-shell { display: block; }
   .app-header { height: 62px; padding: 0 15px; }
   .product-status { font-size: 8px; letter-spacing: .08em; }
+  .header-actions { gap: 8px; }
+  .demo-button { max-width: 105px; padding: 6px 8px; font-size: 8px; }
   .workspace { display: flex; flex-direction: column-reverse; min-height: 0; }
   .map-workspace { height: 64vh; min-height: 500px; }
   .side-panel { overflow: visible; padding: 24px 19px 36px; border-right: 0; border-top: 1px solid var(--line); }

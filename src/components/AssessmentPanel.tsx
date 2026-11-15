@@ -52,6 +52,7 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
   const visibleFeatures = assessment.concern_zones.features.filter((feature) => !selectedPlotId || feature.properties.plot_id === selectedPlotId);
   const attentionCount = visibleFeatures.filter((feature) => feature.properties.concern_level === "yellow" || feature.properties.concern_level === "red").length;
   const selectedLevel = selectedZone?.concern_level;
+  const isDemo = assessment.provenance.demo === true;
 
   function toggleStep(index: number) {
     setCompletedSteps((current) => {
@@ -64,6 +65,12 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
 
   return (
     <section className="assessment-panel" aria-labelledby="assessment-title">
+      {isDemo && (
+        <div className="demo-disclaimer" role="note">
+          <strong>Presentation demo</strong>
+          <span>These colors, measurements, groundwater records, and deadlines are simulated—not real farm advice.</span>
+        </div>
+      )}
       <div className={`farmer-status level-${assessment.overall_concern}`}>
         <span className="concern-dot" aria-hidden="true" />
         <div>
@@ -192,7 +199,7 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
 
       <div className="assessment-footer">
         <span>Checked {assessment.observation_start} to {assessment.observation_end}<br />Updated {created}</span>
-        <button type="button" className="refresh-assessment" onClick={onRefresh} disabled={refreshing}>{refreshing ? "Checking…" : "Check for new imagery"}</button>
+        {!isDemo && <button type="button" className="refresh-assessment" onClick={onRefresh} disabled={refreshing}>{refreshing ? "Checking…" : "Check for new imagery"}</button>}
       </div>
     </section>
   );
