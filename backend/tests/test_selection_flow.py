@@ -198,6 +198,8 @@ def test_technical_records_are_protected_when_key_is_configured(monkeypatch: pyt
     monkeypatch.setattr(main_module, "settings", protected_settings)
 
     assert client.get(f"/api/v1/selections/{selection_id}").status_code == 401
+    assert client.post(f"/api/v1/selections/{selection_id}/processing-runs").status_code == 401
+    assert client.get(f"/api/v1/selections/{selection_id}/assessments").status_code == 401
     authorized = client.get(
         f"/api/v1/selections/{selection_id}",
         headers={"X-Technical-API-Key": "test-technical-key"},

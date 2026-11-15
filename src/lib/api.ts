@@ -1,4 +1,5 @@
 import type {
+  Assessment,
   ApiErrorBody,
   BoundaryFeature,
   ProcessingRun,
@@ -56,4 +57,29 @@ export async function getProcessingRun(runId: string): Promise<ProcessingRun> {
   const response = await fetch(`${API_BASE_URL}/api/v1/processing-runs/${runId}`);
   if (!response.ok) throw await responseError(response);
   return (await response.json()) as ProcessingRun;
+}
+
+export async function getSelection(selectionId: string): Promise<SelectionResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/selections/${selectionId}`);
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as SelectionResponse;
+}
+
+export async function getAssessment(assessmentId: string): Promise<Assessment> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/assessments/${assessmentId}`);
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as Assessment;
+}
+
+export async function getLatestAssessment(selectionId: string): Promise<Assessment | null> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/selections/${selectionId}/assessments/latest`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as Assessment;
+}
+
+export async function listAssessments(selectionId: string): Promise<Assessment[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/selections/${selectionId}/assessments`);
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as Assessment[];
 }

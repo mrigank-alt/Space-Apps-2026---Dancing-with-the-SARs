@@ -19,7 +19,7 @@ import {
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import type { MapConfiguration } from "../lib/config";
 import { boundaryFromSnapshot } from "../lib/geometry";
-import type { BoundaryFeature, DrawingTool, SearchResult } from "../types";
+import type { Assessment, BoundaryFeature, BoundaryGeometry, ConcernZoneProperties, DrawingTool, SearchResult } from "../types";
 
 export interface FarmMapHandle {
   undo: () => void;
@@ -35,6 +35,10 @@ interface FarmMapProps {
   onUndoAvailability: (available: boolean) => void;
   onUseMyLocation: () => void;
   locating: boolean;
+  assessment?: Assessment | null;
+  selectedPlotId?: string | null;
+  onZoneSelect?: (zone: ConcernZoneProperties) => void;
+  savedBoundary?: BoundaryGeometry | null;
 }
 
 const INITIAL_CENTER: [number, number] = [-112.149, 49.788];
@@ -49,6 +53,10 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
     onUndoAvailability,
     onUseMyLocation,
     locating,
+    assessment,
+    selectedPlotId,
+    onZoneSelect,
+    savedBoundary,
   },
   ref,
 ) {
@@ -250,6 +258,93 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
       map.flyTo({ center: location.center, zoom: 15, duration: 1200, essential: true });
     }
   }, [location]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const sourceId = "concern-zones";
+    const fillId = "concern-zones-fill";
+    const lineId = "concern-zones-line";
+    if (!assessment) {
+      if (map.getLayer(lineId)) map.removeLayer(lineId);
+      if (map.getLayer(fillId)) map.removeLayer(fillId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      return;
+    }
+    if (!map.getSource(sourceId)) {
+      map.addSource(sourceId, { type: "geojson", data: assessment.concern_zones });
+      map.addLayer({
+        id: fillId,
+        type: "fill",
+        source: sourceId,
+        paint: {
+          "fill-color": ["match", ["get", "concern_level"], "red", "#b83232", "yellow", "#f1c84b", "green", "#2f7d4b", "#7b8581"],
+          "fill-opacity": 0.62,
+        },
+      });
+      map.addLayer({
+        id: lineId,
+        type: "line",
+        source: sourceId,
+        paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.9 },
+      });
+    } else {
+      (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData(assessment.concern_zones);
+    }
+    const filter: maplibregl.FilterSpecification | null = selectedPlotId
+      ? ["==", ["get", "plot_id"], selectedPlotId]
+      : null;
+    map.setFilter(fillId, filter);
+    map.setFilter(lineId, filter);
+    const click = (event: maplibregl.MapLayerMouseEvent) => {
+      const properties = event.features?.[0]?.properties as ConcernZoneProperties | undefined;
+      if (properties) onZoneSelect?.(properties);
+    };
+    const enter = () => { map.getCanvas().style.cursor = "pointer"; };
+    const leave = () => { map.getCanvas().style.cursor = ""; };
+    map.on("click", fillId, click);
+    map.on("mouseenter", fillId, enter);
+    map.on("mouseleave", fillId, leave);
+    return () => {
+      map.off("click", fillId, click);
+      map.off("mouseenter", fillId, enter);
+      map.off("mouseleave", fillId, leave);
+    };
+  }, [assessment, onZoneSelect, ready, selectedPlotId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const sourceId = "saved-farm";
+    const fillId = "saved-farm-fill";
+    const lineId = "saved-farm-line";
+    if (!savedBoundary) {
+      if (map.getLayer(lineId)) map.removeLayer(lineId);
+      if (map.getLayer(fillId)) map.removeLayer(fillId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      return;
+    }
+    const data = { type: "Feature" as const, properties: {}, geometry: savedBoundary };
+    if (!map.getSource(sourceId)) {
+      map.addSource(sourceId, { type: "geojson", data });
+      map.addLayer({ id: fillId, type: "fill", source: sourceId, paint: { "fill-color": "#d8ff70", "fill-opacity": 0.08 } });
+      map.addLayer({ id: lineId, type: "line", source: sourceId, paint: { "line-color": "#f8ffe7", "line-width": 3 } });
+    } else {
+      (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData(data);
+    }
+    const coordinates: [number, number][] = [];
+    const collect = (value: unknown) => {
+      if (!Array.isArray(value)) return;
+      if (value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number") {
+        coordinates.push([value[0], value[1]]);
+      } else value.forEach(collect);
+    };
+    collect(savedBoundary.coordinates);
+    if (coordinates.length) {
+      const bounds = coordinates.reduce((result, point) => result.extend(point), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
+      map.fitBounds(bounds, { padding: 90, maxZoom: 17, duration: 900 });
+    }
+  }, [ready, savedBoundary]);
 
   function changeBasemap(mode: "satellite" | "map") {
     const map = mapRef.current;

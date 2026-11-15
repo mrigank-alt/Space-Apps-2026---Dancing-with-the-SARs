@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FarmMap, type FarmMapHandle } from "./components/FarmMap";
+import { AssessmentPanel } from "./components/AssessmentPanel";
 import { FarmProfileForm, type FarmFormValues } from "./components/FarmProfileForm";
 import { LocationSearch } from "./components/LocationSearch";
-import { createSelection, getProcessingRun, startProcessing } from "./lib/api";
+import { createSelection, getAssessment, getProcessingRun, getSelection, listAssessments, startProcessing } from "./lib/api";
 import { getMapConfiguration } from "./lib/config";
 import { boundaryArea, boundaryPlotAreas, formatArea } from "./lib/geometry";
 import type {
+  Assessment,
   BoundaryFeature,
   DrawingTool,
   ProcessingRun,
   SearchResult,
   SelectionResponse,
+  ConcernZoneProperties,
 } from "./types";
+
+const LAST_SELECTION_KEY = "groundsignal:last-selection-id";
 
 export default function App() {
   const mapRef = useRef<FarmMapHandle>(null);
@@ -28,6 +33,10 @@ export default function App() {
   const [confirmed, setConfirmed] = useState<SelectionResponse | null>(null);
   const [processingRun, setProcessingRun] = useState<ProcessingRun | null>(null);
   const [processingError, setProcessingError] = useState<string>();
+  const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [assessmentHistory, setAssessmentHistory] = useState<Assessment[]>([]);
+  const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
+  const [selectedZone, setSelectedZone] = useState<ConcernZoneProperties | null>(null);
   const [farmForm, setFarmForm] = useState<FarmFormValues>({
     farmName: "",
     operatorName: "",
@@ -56,6 +65,23 @@ export default function App() {
   }, [confirmed]);
 
   useEffect(() => {
+    const selectionId = new URLSearchParams(window.location.search).get("selection")
+      || window.localStorage.getItem(LAST_SELECTION_KEY);
+    if (!selectionId) return;
+    void (async () => {
+      try {
+        const saved = await getSelection(selectionId);
+        setConfirmed(saved);
+        const history = await listAssessments(selectionId);
+        setAssessmentHistory(history);
+        setAssessment(history[0] ?? null);
+      } catch {
+        window.localStorage.removeItem(LAST_SELECTION_KEY);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
     if (!processingRun || !["queued", "running"].includes(processingRun.status)) return;
     const timer = window.setTimeout(async () => {
       try {
@@ -66,6 +92,20 @@ export default function App() {
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [processingRun]);
+
+  useEffect(() => {
+    if (processingRun?.status !== "completed" || !processingRun.assessment_id) return;
+    void getAssessment(processingRun.assessment_id)
+      .then((result) => {
+        setAssessment(result);
+        if (confirmed) {
+          void listAssessments(confirmed.selection_id).then(setAssessmentHistory);
+        }
+        setSelectedPlotId(null);
+        setSelectedZone(null);
+      })
+      .catch((error: unknown) => setProcessingError(error instanceof Error ? error.message : "The concern map could not be loaded."));
+  }, [confirmed, processingRun]);
 
   function beginDraw(tool: "polygon" | "freehand") {
     setConfirmed(null);
@@ -136,6 +176,10 @@ export default function App() {
         data_processing_consent: true,
       });
       setConfirmed(response);
+      window.localStorage.setItem(LAST_SELECTION_KEY, response.selection_id);
+      window.history.replaceState({}, "", `?selection=${encodeURIComponent(response.selection_id)}`);
+      setAssessment(null);
+      setAssessmentHistory([]);
       setProcessingRun(null);
       setProcessingError(undefined);
       setActiveTool("idle");
@@ -165,6 +209,12 @@ export default function App() {
     setBoundary(null);
     setConfirmed(null);
     setProcessingRun(null);
+    setAssessment(null);
+    setAssessmentHistory([]);
+    setSelectedPlotId(null);
+    setSelectedZone(null);
+    window.localStorage.removeItem(LAST_SELECTION_KEY);
+    window.history.replaceState({}, "", window.location.pathname);
     setProcessingError(undefined);
     setFarmForm({
       farmName: "",
@@ -186,17 +236,17 @@ export default function App() {
           <div className="brand-mark" aria-hidden="true"><span /></div>
           <div>
             <strong>Groundsignal</strong>
-            <small>Farm setup</small>
+            <small>{confirmed ? "Farm monitoring" : "Farm setup"}</small>
           </div>
         </div>
         <div className="product-status">
           <span />
-          FARM SETUP
+          {confirmed ? "FARM MONITORING" : "FARM SETUP"}
         </div>
       </header>
 
       <div className="workspace">
-        <aside className="side-panel" aria-label="Farm boundary workflow">
+        <aside className={`side-panel ${confirmed ? "has-saved-farm" : ""}`} aria-label="Farm boundary workflow">
           <div className="panel-intro">
             <span className="eyebrow">START YOUR FARM PROFILE</span>
             <h1>Tell us about your farm.</h1>
@@ -421,11 +471,11 @@ export default function App() {
                 )}
                 {confirmed.gunw_availability && confirmed.gunw_availability.archived_gunw_product_count > 0 && (
                   <div className="processing-panel">
-                    {!processingRun ? (
+                    {!processingRun && !assessment ? (
                       <button type="button" className="prepare-results-button" onClick={prepareSatelliteResults}>
-                        Prepare satellite results
+                        Analyze my land
                       </button>
-                    ) : (
+                    ) : processingRun ? (
                       <div className={`processing-status ${processingRun.status}`} role="status">
                         <strong>
                           {processingRun.status === "completed"
@@ -439,6 +489,12 @@ export default function App() {
                                   : "Preparing satellite results"}
                         </strong>
                         <p>{processingRun.message}</p>
+                        {["queued", "running"].includes(processingRun.status) && (
+                          <div className="progress-track" aria-label={`${processingRun.progress_percent}% complete`}>
+                            <span style={{ width: `${processingRun.progress_percent}%` }} />
+                            <small>{processingRun.stage} · {processingRun.progress_percent}%</small>
+                          </div>
+                        )}
                         {processingRun.status === "completed" && processingRun.result_summary?.pair_count != null && (
                           <small>{processingRun.result_summary.pair_count} image pairs were processed for this farm.</small>
                         )}
@@ -448,9 +504,28 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                    )}
+                    ) : null}
                     {processingError && <div className="submit-error" role="alert">{processingError}</div>}
                   </div>
+                )}
+                {assessment && (
+                  <AssessmentPanel
+                    assessment={assessment}
+                    history={assessmentHistory}
+                    selectedPlotId={selectedPlotId}
+                    selectedZone={selectedZone}
+                    refreshing={Boolean(processingRun && ["queued", "running"].includes(processingRun.status))}
+                    onSelectPlot={(plotId) => {
+                      setSelectedPlotId(plotId);
+                      setSelectedZone(null);
+                    }}
+                    onRefresh={prepareSatelliteResults}
+                    onSelectAssessment={(item) => {
+                      setAssessment(item);
+                      setSelectedPlotId(null);
+                      setSelectedZone(null);
+                    }}
+                  />
                 )}
                 <button type="button" className="new-farm-button" onClick={clearSelection}>
                   Set up another farm
@@ -485,12 +560,18 @@ export default function App() {
             onUndoAvailability={setUndoAvailable}
             onUseMyLocation={useMyLocation}
             locating={locating}
+            assessment={assessment}
+            selectedPlotId={selectedPlotId}
+            onZoneSelect={(zone) => setSelectedZone(zone)}
+            savedBoundary={confirmed?.geometry ?? null}
           />
           <div className="map-instruction">
             <span aria-hidden="true">i</span>
-            <strong>{boundary ? `${plotCount} ${plotCount === 1 ? "plot" : "plots"} selected` : "Search, then draw"}</strong>
+            <strong>{assessment ? "Latest movement result" : boundary ? `${plotCount} ${plotCount === 1 ? "plot" : "plots"} selected` : "Search, then draw"}</strong>
             <small>
-              {boundary
+              {assessment
+                ? "Click a colored area for a plain-language explanation."
+                : boundary
                 ? "Add another plot with a drawing tool, or edit the selected plot using its white handles."
                 : "The location pin is a reference point, not your farm boundary."}
             </small>

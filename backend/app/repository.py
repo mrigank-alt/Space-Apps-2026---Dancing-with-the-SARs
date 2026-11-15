@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Protocol
 
-from .models import PlotRecord, ProcessingRun, SpatialSelection
+from .models import Assessment, PlotRecord, ProcessingRun, SpatialSelection
 
 
 class SelectionRepository(Protocol):
@@ -22,6 +22,14 @@ class SelectionRepository(Protocol):
 
     def get_processing_run(self, run_id: str) -> ProcessingRun | None: ...
 
+    def list_processing_runs(self, selection_id: str) -> list[ProcessingRun]: ...
+
+    def save_assessment(self, assessment: Assessment) -> Assessment: ...
+
+    def get_assessment(self, assessment_id: str) -> Assessment | None: ...
+
+    def list_assessments(self, selection_id: str) -> list[Assessment]: ...
+
 
 class InMemorySelectionRepository:
     """Development repository with the same interface a durable store can implement."""
@@ -29,6 +37,7 @@ class InMemorySelectionRepository:
     def __init__(self) -> None:
         self._items: dict[str, SpatialSelection] = {}
         self._processing_runs: dict[str, ProcessingRun] = {}
+        self._assessments: dict[str, Assessment] = {}
         self._lock = RLock()
 
     def save(self, selection: SpatialSelection) -> SpatialSelection:
@@ -62,6 +71,31 @@ class InMemorySelectionRepository:
     def get_processing_run(self, run_id: str) -> ProcessingRun | None:
         with self._lock:
             return self._processing_runs.get(run_id)
+
+    def list_processing_runs(self, selection_id: str) -> list[ProcessingRun]:
+        with self._lock:
+            return sorted(
+                (run for run in self._processing_runs.values() if run.selection_id == selection_id),
+                key=lambda run: run.created_at,
+                reverse=True,
+            )
+
+    def save_assessment(self, assessment: Assessment) -> Assessment:
+        with self._lock:
+            self._assessments[assessment.assessment_id] = assessment
+        return assessment
+
+    def get_assessment(self, assessment_id: str) -> Assessment | None:
+        with self._lock:
+            return self._assessments.get(assessment_id)
+
+    def list_assessments(self, selection_id: str) -> list[Assessment]:
+        with self._lock:
+            return sorted(
+                (item for item in self._assessments.values() if item.selection_id == selection_id),
+                key=lambda item: item.created_at,
+                reverse=True,
+            )
 
 
 class SQLiteSelectionRepository:
@@ -125,6 +159,23 @@ class SQLiteSelectionRepository:
             self._connection.execute(
                 "CREATE INDEX IF NOT EXISTS processing_runs_selection_idx "
                 "ON processing_runs(selection_id, created_at DESC)"
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS assessments (
+                    assessment_id TEXT PRIMARY KEY,
+                    selection_id TEXT NOT NULL,
+                    processing_run_id TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(selection_id) REFERENCES selections(selection_id),
+                    FOREIGN KEY(processing_run_id) REFERENCES processing_runs(run_id)
+                )
+                """
+            )
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS assessments_selection_idx "
+                "ON assessments(selection_id, created_at DESC)"
             )
 
     def save(self, selection: SpatialSelection) -> SpatialSelection:
@@ -262,6 +313,50 @@ class SQLiteSelectionRepository:
         if row is None:
             return None
         return ProcessingRun.model_validate(json.loads(row["record_json"]))
+
+    def list_processing_runs(self, selection_id: str) -> list[ProcessingRun]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT record_json FROM processing_runs WHERE selection_id = ? ORDER BY created_at DESC",
+                (selection_id,),
+            ).fetchall()
+        return [ProcessingRun.model_validate(json.loads(row["record_json"])) for row in rows]
+
+    def save_assessment(self, assessment: Assessment) -> Assessment:
+        payload = json.dumps(assessment.model_dump(mode="json"), separators=(",", ":"))
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO assessments (
+                    assessment_id, selection_id, processing_run_id, record_json, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(assessment_id) DO UPDATE SET record_json = excluded.record_json
+                """,
+                (
+                    assessment.assessment_id,
+                    assessment.selection_id,
+                    assessment.processing_run_id,
+                    payload,
+                    assessment.created_at.isoformat(),
+                ),
+            )
+        return assessment
+
+    def get_assessment(self, assessment_id: str) -> Assessment | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT record_json FROM assessments WHERE assessment_id = ?",
+                (assessment_id,),
+            ).fetchone()
+        return None if row is None else Assessment.model_validate(json.loads(row["record_json"]))
+
+    def list_assessments(self, selection_id: str) -> list[Assessment]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT record_json FROM assessments WHERE selection_id = ? ORDER BY created_at DESC",
+                (selection_id,),
+            ).fetchall()
+        return [Assessment.model_validate(json.loads(row["record_json"])) for row in rows]
 
     @staticmethod
     def _record(row: sqlite3.Row | None) -> SpatialSelection | None:

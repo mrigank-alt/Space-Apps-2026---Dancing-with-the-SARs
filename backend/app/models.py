@@ -168,6 +168,62 @@ class ProcessingRun(BaseModel):
     output_directory: str | None = None
     result_summary: dict[str, Any] | None = None
     error_detail: str | None = None
+    progress_percent: int = Field(default=0, ge=0, le=100)
+    stage: str = "Waiting"
+    assessment_id: str | None = None
+
+
+ConcernLevel = Literal["green", "yellow", "red", "grey"]
+
+
+class GroundwaterEvidence(BaseModel):
+    status: Literal["available", "not_available", "outside_coverage", "check_failed"]
+    provider: str | None = None
+    checked_at: datetime
+    observation_count: int = Field(default=0, ge=0)
+    monitoring_site_count: int = Field(default=0, ge=0)
+    relationship_eligible: bool = False
+    relationship_assessment: Literal["supports", "contradicts", "insufficient"] = "insufficient"
+    trend_summary: str | None = None
+    summary: str
+    limitations: list[str] = Field(default_factory=list)
+
+
+class ForecastResult(BaseModel):
+    status: Literal["available", "not_available"] = "not_available"
+    summary: str
+    limitations: list[str] = Field(default_factory=list)
+
+
+class Recommendation(BaseModel):
+    priority: Literal["routine", "review", "prompt_review"]
+    title: str
+    detail: str
+    scope: str = "farm"
+
+
+class Assessment(BaseModel):
+    """Durable, auditable interpretation of one completed satellite run."""
+
+    assessment_id: str
+    selection_id: str
+    processing_run_id: str
+    status: Literal["completed"] = "completed"
+    assessment_type: Literal["movement_only", "groundwater_related"]
+    methodology: Literal["exploratory_relative_concern"] = "exploratory_relative_concern"
+    created_at: datetime
+    observation_start: str | None = None
+    observation_end: str | None = None
+    summary: str
+    overall_concern: ConcernLevel
+    evidence_quality: Literal["limited", "moderate", "strong"]
+    concern_zones: dict[str, Any]
+    plot_summaries: list[dict[str, Any]] = Field(default_factory=list)
+    recommendations: list[Recommendation] = Field(default_factory=list)
+    groundwater: GroundwaterEvidence
+    forecast: ForecastResult
+    limitations: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
 
 class SpatialSelection(BaseModel):

@@ -1,4 +1,4 @@
-import type { Feature, MultiPolygon, Point, Polygon } from "geojson";
+import type { Feature, FeatureCollection, MultiPolygon, Point, Polygon } from "geojson";
 
 export type BoundaryGeometry = Polygon | MultiPolygon;
 export type BoundaryFeature = Feature<BoundaryGeometry>;
@@ -157,6 +157,70 @@ export interface ProcessingRun {
     } | null;
     phase_processing?: string | null;
   } | null;
+  progress_percent: number;
+  stage: string;
+  assessment_id: string | null;
+}
+
+export type ConcernLevel = "green" | "yellow" | "red" | "grey";
+
+export interface ConcernZoneProperties {
+  zone_id: string;
+  plot_id: string;
+  plot_index: number;
+  concern_level: ConcernLevel;
+  label: string;
+  explanation: string;
+  los_velocity_cm_year: number | null;
+  observed_los_change_cm: number | null;
+  persistence_fraction: number | null;
+  coherence: number | null;
+  uncertainty_available: boolean;
+  measurement_start: string | null;
+  measurement_end: string | null;
+}
+
+export interface Assessment {
+  assessment_id: string;
+  selection_id: string;
+  processing_run_id: string;
+  status: "completed";
+  assessment_type: "movement_only" | "groundwater_related";
+  methodology: "exploratory_relative_concern";
+  created_at: string;
+  observation_start: string | null;
+  observation_end: string | null;
+  summary: string;
+  overall_concern: ConcernLevel;
+  evidence_quality: "limited" | "moderate" | "strong";
+  concern_zones: FeatureCollection<Polygon | MultiPolygon, ConcernZoneProperties>;
+  plot_summaries: Array<{
+    plot_id: string;
+    plot_index: number;
+    overall_concern: ConcernLevel;
+    pixel_counts: Record<ConcernLevel, number>;
+  }>;
+  recommendations: Array<{
+    priority: "routine" | "review" | "prompt_review";
+    title: string;
+    detail: string;
+    scope: string;
+  }>;
+  groundwater: {
+    status: "available" | "not_available" | "outside_coverage" | "check_failed";
+    provider: string | null;
+    checked_at: string;
+    observation_count: number;
+    monitoring_site_count: number;
+    relationship_eligible: boolean;
+    relationship_assessment: "supports" | "contradicts" | "insufficient";
+    trend_summary: string | null;
+    summary: string;
+    limitations: string[];
+  };
+  forecast: { status: "available" | "not_available"; summary: string; limitations: string[] };
+  limitations: string[];
+  provenance: Record<string, unknown>;
 }
 
 export interface ApiErrorBody {

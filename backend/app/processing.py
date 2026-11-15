@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from subsidence_engine import PipelineConfig, run_pipeline
 
+from .assessment import AssessmentService
 from .models import ProcessingRun
 from .repository import SelectionRepository
 
@@ -17,6 +18,7 @@ class GUNWProcessingService:
     def __init__(self, repository: SelectionRepository, output_root: str) -> None:
         self._repository = repository
         self._output_root = Path(output_root)
+        self._assessments = AssessmentService()
 
     def queue(self, selection_id: str) -> ProcessingRun | None:
         selection = self._repository.get(selection_id)
@@ -29,6 +31,8 @@ class GUNWProcessingService:
             status="queued",
             message="Your satellite analysis is waiting to start.",
             created_at=now,
+            progress_percent=5,
+            stage="Waiting",
         )
         return self._repository.save_processing_run(run)
 
@@ -61,6 +65,8 @@ class GUNWProcessingService:
                 "status": "running",
                 "message": "Satellite imagery is being prepared for your plots.",
                 "started_at": datetime.now(UTC),
+                "progress_percent": 20,
+                "stage": "Preparing satellite imagery",
             }
         )
         self._repository.save_processing_run(started)
@@ -72,6 +78,14 @@ class GUNWProcessingService:
                     output_root=self._output_root,
                 )
             )
+            interpreting = started.model_copy(update={
+                "message": "The satellite measurements are being checked and mapped.",
+                "progress_percent": 85,
+                "stage": "Building your concern map",
+            })
+            self._repository.save_processing_run(interpreting)
+            assessment = self._assessments.create(selection, interpreting, manifest)
+            self._repository.save_assessment(assessment)
             summary = {
                 "run_id": manifest.get("run_id"),
                 "pair_count": (manifest.get("pair_network") or {}).get("pair_count"),
@@ -88,13 +102,16 @@ class GUNWProcessingService:
                 "measurement_interval": manifest.get("measurement_interval"),
                 "phase_processing": (manifest.get("processing") or {}).get("phase_processing"),
             }
-            completed = started.model_copy(
+            completed = interpreting.model_copy(
                 update={
                     "status": "completed",
                     "message": "Satellite results are ready for these plots.",
                     "completed_at": datetime.now(UTC),
                     "output_directory": manifest.get("run_dir"),
                     "result_summary": summary,
+                    "progress_percent": 100,
+                    "stage": "Ready",
+                    "assessment_id": assessment.assessment_id,
                 }
             )
             self._repository.save_processing_run(completed)
@@ -119,6 +136,7 @@ class GUNWProcessingService:
                     "message": message,
                     "completed_at": datetime.now(UTC),
                     "error_detail": detail[-8000:],
+                    "stage": "Needs attention",
                 }
             )
             self._repository.save_processing_run(failed)
@@ -133,6 +151,8 @@ class GUNWProcessingService:
                     "status": status,
                     "message": message,
                     "completed_at": datetime.now(UTC),
+                    "stage": "Complete",
+                    "progress_percent": 100,
                 }
             )
         )

@@ -15,6 +15,53 @@
   --orange: #e96d3a;
 }
 
+/* Farmer-facing assessment results */
+.progress-track { margin-top: 12px; height: 34px; position: relative; background: #dce5df; overflow: hidden; }
+.progress-track > span { display: block; height: 5px; background: #2f7d4b; transition: width .35s ease; }
+.progress-track small { display: block; padding: 7px 10px; color: #38564b; }
+.assessment-panel { margin-top: 18px; border-top: 1px solid #b9cabd; padding-top: 18px; color: #173d30; }
+.assessment-summary { display: flex; gap: 12px; padding: 16px; border: 1px solid #bbc9c0; background: #f5f7f3; }
+.assessment-summary .concern-dot { width: 18px; height: 18px; border-radius: 50%; flex: 0 0 auto; margin-top: 4px; background: #7b8581; }
+.assessment-summary.level-green .concern-dot { background: #2f7d4b; }
+.assessment-summary.level-yellow .concern-dot { background: #d8a51e; }
+.assessment-summary.level-red .concern-dot { background: #b83232; }
+.assessment-summary h3 { margin: 2px 0 5px; font-size: 1.25rem; }
+.assessment-summary p, .plain-language-note p, .evidence-card p, .recommendation-list p, .zone-detail p { margin: 4px 0 0; line-height: 1.45; }
+.assessment-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px; color: #64786f; font-size: .75rem; margin: 8px 0 14px; }
+.assessment-history { margin: -4px 0 12px; font-size: .75rem; }
+.assessment-history summary { cursor: pointer; font-weight: 750; }
+.assessment-history > div { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.assessment-history button { border: 1px solid #a9b9af; background: #fff; color: #315342; padding: 6px 8px; font: inherit; cursor: pointer; }
+.assessment-history button.active { background: #315342; color: #fff; }
+.plain-language-note, .evidence-card { background: #eef4ef; padding: 13px; margin: 12px 0; }
+.map-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 14px 0; font-size: .77rem; }
+.map-legend span { display: flex; align-items: center; gap: 7px; }
+.map-legend i { width: 14px; height: 14px; border-radius: 3px; background: #7b8581; }
+.map-legend .legend-green i { background: #2f7d4b; }
+.map-legend .legend-yellow i { background: #f1c84b; border: 1px solid #9a7714; }
+.map-legend .legend-red i { background: #b83232; }
+.plot-switcher { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+.plot-switcher button { border: 1px solid #9fb2a7; background: #fff; color: #204a3b; padding: 8px 10px; font: inherit; font-size: .76rem; cursor: pointer; }
+.plot-switcher button.active { background: #174b3b; color: #fff; }
+.zone-detail { border-left: 5px solid #7b8581; padding: 12px; background: #f4f5f2; }
+.zone-detail.level-green { border-color: #2f7d4b; }
+.zone-detail.level-yellow { border-color: #d8a51e; }
+.zone-detail.level-red { border-color: #b83232; }
+.zone-detail > strong { display: block; margin-top: 3px; }
+.zone-detail dl { margin: 10px 0 0; font-size: .76rem; }
+.zone-detail dl div { display: flex; justify-content: space-between; gap: 10px; padding-top: 5px; }
+.zone-detail dd { margin: 0; text-align: right; font-weight: 700; }
+.map-click-hint { color: #62756c; font-size: .78rem; font-style: italic; }
+.evidence-card small { display: block; margin-top: 9px; color: #5c6f66; line-height: 1.4; }
+.recommendation-list h4 { margin: 17px 0 5px; }
+.recommendation-list > div { border-bottom: 1px solid #d4ddd7; padding: 10px 0; }
+.recommendation-list p { font-size: .8rem; color: #536a60; }
+.limitations { margin-top: 14px; font-size: .78rem; }
+.limitations summary { cursor: pointer; font-weight: 700; }
+.limitations li { margin: 5px 0; line-height: 1.35; }
+.refresh-assessment { width: 100%; margin-top: 14px; padding: 12px; border: 1px solid #174b3b; background: #fff; color: #174b3b; font-weight: 800; cursor: pointer; }
+.refresh-assessment:disabled { opacity: .6; cursor: wait; }
+
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; width: 100%; min-width: 320px; min-height: 100%; }
 body { min-height: 100vh; overflow: hidden; }
@@ -86,6 +133,9 @@ button { color: inherit; }
   padding: 28px 26px 30px;
   scrollbar-width: thin;
 }
+.side-panel.has-saved-farm .panel-intro,
+.side-panel.has-saved-farm .workflow-step { display: none; }
+.side-panel.has-saved-farm .confirm-zone { margin-top: 0; }
 
 .panel-intro { padding-bottom: 24px; border-bottom: 1px solid var(--line); }
 .eyebrow { color: #65796f; font-size: 9px; font-weight: 850; letter-spacing: .19em; }

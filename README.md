@@ -1,6 +1,6 @@
 # Groundsignal — farm monitoring intake
 
-Groundsignal collects a farmer's operating context, validates one or more farm-plot boundaries, stores a durable spatial record, checks the NASA Alaska Satellite Facility archive for GUNW products, and can prepare georeferenced subsidence layers for later map work. It does **not** calculate groundwater risk, predict groundwater conditions, or make pumping recommendations.
+Groundsignal lets a farmer save one or more farm plots, run the integrated NASA ASF GUNW/SBAS workflow, and view a geographically aligned land-movement concern map with plain-language guidance. It keeps land movement separate from groundwater causation: a result is only described as groundwater-related when independent evidence meets explicit eligibility requirements.
 
 ## What is included
 
@@ -18,7 +18,12 @@ Groundsignal collects a farmer's operating context, validates one or more farm-p
 - Automatic per-plot checks for NISAR Provisional, Beta, Validated, and Urgent Response GUNW, ARIA Sentinel-1 GUNW, and Sentinel-1 SLC source scenes through the public NASA ASF Search API
 - Saved GUNW catalog status, exact match counts, and a bounded sample of product metadata and download URLs
 - Integrated GUNW download/screening and SBAS processing with durable run status, pixel CSV output, cloud-optimized GeoTIFF layers, a time-series cube, quality metrics, and a machine-readable run manifest
-- Frontend geometry tests, backend validation tests, catalog parsing tests, and drawing-to-API integration tests
+- Persistent, versioned assessments and analysis history
+- Transparent exploratory movement classification with green, yellow, red, and grey states
+- Farm-clipped clickable GeoJSON zones and a source-resolution classification GeoTIFF
+- Modular public-groundwater context using the modern USGS Water Data API where covered, with explicit unavailable/insufficient states elsewhere
+- Plain-language explanations, qualitative urgency, evidence limitations, recommendations, plot switching, refresh, and saved-farm reopening
+- Frontend geometry tests, backend validation/science/geospatial tests, catalog parsing tests, and drawing-to-API integration tests
 
 Selections and processing-run status are stored in `backend/data/selections.sqlite3`. The database keeps the canonical GeoJSON record and an SQLite R-tree bounding-box index for later candidate-scene and environmental-record queries. Generated raster/cube outputs are stored under `backend/data/processing`. The repository interface can be replaced with PostGIS plus object storage for a multi-user production deployment without changing the selection service layer.
 
@@ -96,7 +101,9 @@ backend/.venv/bin/python -m backend.scripts.check_gunw sel_your_selection_id
 
 The saved record at `/api/v1/selections/{selection_id}` is the handoff package for downstream analysis. It contains each `plot_id`, exact Polygon geometry, bounding box, area, farmer/farm context, availability status, match counts, and a sample of product download URLs. When `TECHNICAL_API_KEY` is configured, request it with the `X-Technical-API-Key` header. An Earthdata Login is required to download protected NASA products.
 
-When archived GUNW imagery is found, the farmer interface offers **Prepare satellite results**. The frontend creates a durable processing run and polls its status. The backend passes the saved selection directly into the integrated GUNW screening and SBAS engine. A completed run contains `heatmap_pixels.csv`, GeoTIFF layers, a Zarr displacement cube, validation metrics, and `manifest.json`. These are subsidence-analysis inputs for a later visualization/risk module; they are not themselves a groundwater-risk score.
+When archived GUNW imagery is found, the farmer interface offers **Analyze my land**. The frontend creates a durable processing run and polls its progress. The backend passes the saved selection directly into the integrated GUNW screening and SBAS engine, then creates a persistent assessment, clickable concern zones, and `concern_classification.tif`. A farmer can reopen a saved result using `/?selection={selection_id}` or the same browser's saved pointer, and can request a refresh without deleting prior assessments.
+
+See [Product architecture and scientific method](docs/PRODUCT_AND_SCIENCE.md) for the processing flow, API, classifier criteria, data sources, limitations, live-data acceptance evidence, and deployment prerequisites.
 
 ### Signal-preserving GUNW processing
 
