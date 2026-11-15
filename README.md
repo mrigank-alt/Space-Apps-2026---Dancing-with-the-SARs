@@ -161,3 +161,42 @@ The example config uses `selection_id: latest`; after confirming a polygon, it a
 The June–October example writes one `heatmap_pixels.csv` with one row per AOI pixel, coordinates, LOS and vertical field names, quality fields, per-epoch cumulative displacement, differential gradient, acceleration, and seasonal-split fields. Harmony does not currently return the GUNW incidence-angle metadata cube as a spatial raster, so vertical fields are null until valid incidence geometry is available. Acceleration and seasonal values are null for spans below their configured minimum duration. A persistent `outputs/.cache/<aoi_id>` reuses downloaded and prepared clips across runs.
 
 Each run writes to `outputs/<aoi_id>/<run_id>/`. The June–October chain has nine pairs and ten epochs with zero independent cycles, so formal uncertainty is null even though the least-squares point estimate is fast. Relative displacement is referenced to the local annulus; use independent geodetic validation before treating it as absolute subsidence or comparing it to a reported 4 cm. There is no default risk score or risk weighting.
+
+### LOS signal preservation and interval displacement
+
+Engine exports now fit the spatial ramp only on coherent pixels in the exterior
+reference annulus. Previously the fast export fitted the whole scene, including
+the selected farmland, which can subtract genuine broad deformation gradients.
+If the annulus cannot support the ramp fit, the pair remains missing; the engine
+does not silently fit the farmland instead. The annulus still needs independent
+stability checks: movement shared by the farm and reference area is unobservable.
+
+Set `remove_ramp: false` in the engine YAML to compare offset-only processing.
+This preserves spatial trends but also retains atmospheric/orbital ramps. It is
+a sensitivity check, not automatically a more accurate result. Both modes reuse
+the same raw/prepared phase clips and need no extra downloads. Regenerate the
+pair stack from those clips: old `pair_stack_npz` inputs already contain the old
+correction, which SBAS cannot undo. New stacks carry phase-processing provenance;
+an old stack without it emits a warning and is labeled unknown in the manifest.
+
+The CSV now includes `los_displacement_change_cm` and
+`vertical_displacement_change_cm`, with `measurement_start` and `measurement_end`.
+These are the final observed epoch minus the first observed epoch, not annual
+velocity or an extrapolation to requested dates. The manifest records the actual
+measurement interval and median LOS interval change. Positive/negative signs
+retain the configured phase convention; vertical values remain unknown without
+valid incidence geometry and assume negligible horizontal motion when available.
+
+Numerical regression checks (NumPy only; no Earthdata login):
+
+```powershell
+python backend/tests/test_los_signal_preservation.py
+python backend/tests/test_los_signal_preservation.py --benchmark
+```
+
+These verify known synthetic displacement through phase screening and SBAS,
+including signed 4 cm motion, broad gradients, missing reference support and
+disconnected networks. They do not establish Rafsanjan accuracy. Field validation
+requires the exact GeoJSON, acquisition interval, phase/cache stack, independent
+measurement source, its location/statistic, uncertainty, and LOS versus vertical
+definition. Matching a single reported number is not evidence of 100% accuracy.

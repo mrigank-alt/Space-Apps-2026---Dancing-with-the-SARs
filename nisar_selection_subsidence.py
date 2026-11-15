@@ -110,6 +110,7 @@ class RunOptions:
     offline: bool = False
     use_cc: bool = True
     engine_export_only: bool = False
+    remove_ramp: bool = True
 
 
 # ============================== Catalog (ASF) ===============================
@@ -622,20 +623,29 @@ def _acquire(city, idx, total, item, spec, fetcher):
 
 
 # ============================ Stack processing ==============================
-def _detrend_stack(PH, COH, rml, exclude, sign):
-    """Per-pair robust ramp removal (ramp fitted outside `exclude`), reference-annulus zeroing, rad -> LOS cm."""
+def _detrend_stack(PH, COH, rml, exclude, sign, *, reference_only=False, remove_ramp=True):
+    """Reference phase and convert radians to relative LOS cm.
+
+    The engine fits ramps only on the exterior reference area, never on the
+    measurement target. Insufficient reference support leaves that pair NaN;
+    falling back to the target would risk fitting away the deformation itself.
+    The legacy hotspot workflow retains its iterative exclusion behavior.
+    """
     scale = sign * WAVELENGTH_M * 100.0 / (4 * np.pi)
     Y = np.full(PH.shape, np.nan, np.float32)
     for i in range(PH.shape[0]):
         ph = PH[i].astype(np.float64)
         usable = np.isfinite(ph) & (COH[i] >= COHERENCE_MIN)
-        ramp = _robust_surface(ph, usable & ~exclude)
-        if ramp is None:
-            ramp = _robust_surface(ph, usable)
-        if ramp is None:
-            continue
+        ramp = 0.0
+        if remove_ramp:
+            fit_mask = usable & (rml if reference_only else ~exclude)
+            ramp = _robust_surface(ph, fit_mask)
+            if ramp is None and not reference_only:
+                ramp = _robust_surface(ph, usable)
+            if ramp is None:
+                continue
         clean = ph - ramp
-        ref = clean[rml & np.isfinite(clean)]
+        ref = clean[rml & usable & np.isfinite(clean)]
         if ref.size < MIN_PIXELS_PER_ZONE:
             continue
         Y[i] = (clean - np.median(ref)) * scale
@@ -837,7 +847,8 @@ def _process_city(city, spec, items, acquired, opts, out_root):
     # The bridge only needs the screened displacement stack, not the older
     # hotspot/rate products. Skip those legacy iterative fits on bridge runs.
     if opts.engine_export_only:
-        Y = _detrend_stack(PH, COH, rml, np.zeros(shape, bool), opts.phase_sign)
+        Y = _detrend_stack(PH, COH, rml, np.zeros(shape, bool), opts.phase_sign,
+                           reference_only=True, remove_ramp=opts.remove_ramp)
         epoch_dates = sorted({d for pair in dates for d in pair})
         epoch_index = {d: i for i, d in enumerate(epoch_dates)}
         epoch_days = np.array([(d - epoch_dates[0]).total_seconds() / 86400 for d in epoch_dates], dtype=np.float64)
@@ -851,7 +862,9 @@ def _process_city(city, spec, items, acquired, opts, out_root):
                             pair_start=pair_start, pair_end=pair_end, epoch_days=epoch_days,
                             weights=engine_weights, pair_coherence=COH.astype(np.float32),
                             incidence_angle_deg=INC.astype(np.float32), transform=np.asarray(tf, dtype=np.float64),
-                            crs_wkt=np.asarray(crs), epoch_dates=np.asarray([d.isoformat() for d in epoch_dates]))
+                            crs_wkt=np.asarray(crs), epoch_dates=np.asarray([d.isoformat() for d in epoch_dates]),
+                            phase_processing=np.asarray("reference_only_ramp" if opts.remove_ramp else "reference_only_offset"),
+                            phase_sign=np.asarray(opts.phase_sign))
         return []
 
     # Iterative ramp removal: refit each pair's ramp with detected bowls masked out.
@@ -1128,6 +1141,8 @@ def main():
     parser.add_argument("--no-plots", action="store_true", help="skip PNG figures (CSV/NPZ/GeoTIFF only; fastest)")
     parser.add_argument("--engine-export-only", action="store_true",
                         help="build the bridge stack and skip the legacy hotspot/rate model and visual products")
+    parser.add_argument("--no-remove-ramp", action="store_true",
+                        help="engine export: reference offset only, preserving spatial trends")
     parser.add_argument("--serial", action="store_true", help="process cities one after another instead of in parallel processes")
     parser.add_argument("--workers", type=int, default=0, help="concurrent Harmony requests (default: all of them, max %d)" % MAX_WORKERS)
     parser.add_argument("--phase-sign", type=float, choices=(1.0, -1.0), default=PHASE_SIGN, help="multiply phase by this sign")
@@ -1187,7 +1202,9 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     opts = RunOptions(workers=max(0, args.workers), plots=not args.no_plots, phase_sign=args.phase_sign,
                       use_cache=not args.no_cache, offline=args.offline, use_cc=not args.no_connected_components,
-                      engine_export_only=args.engine_export_only)
+                      engine_export_only=args.engine_export_only, remove_ramp=not args.no_remove_ramp)
+    if args.no_remove_ramp and not args.engine_export_only:
+        parser.error("--no-remove-ramp requires --engine-export-only")
     has_selection = bool(args.geojson or args.selection_id)
     aois = {c: AOIS[c] for c in (args.cities or ([args.label] if has_selection else AOIS))}
 

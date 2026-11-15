@@ -35,14 +35,14 @@ def invert_sbas(
     wgt = np.asarray(weights, dtype=np.float32)
     starts, ends = np.asarray(pair_start, int), np.asarray(pair_end, int)
     times = np.asarray(epoch_days, dtype=np.float64)
+    if times.ndim != 1 or times.size < 2 or not np.all(np.isfinite(times)) or np.any(np.diff(times) <= 0):
+        raise ValueError("epoch_days must contain at least two finite, strictly increasing epochs")
     if obs.ndim != 3 or wgt.shape != obs.shape:
         raise ValueError("displacements and weights must share shape (pair, y, x)")
-    if len(starts) != obs.shape[0] or len(ends) != obs.shape[0]:
+    if starts.ndim != 1 or ends.ndim != 1 or len(starts) != obs.shape[0] or len(ends) != obs.shape[0]:
         raise ValueError("pair endpoint arrays must have one entry per interferogram")
     if starts.min(initial=0) < 0 or ends.max(initial=-1) >= times.size or np.any(ends <= starts):
         raise ValueError("pair endpoints must index increasing epochs")
-    if times.size < 2:
-        raise ValueError("at least two epochs are required")
 
     npair, height, width = obs.shape
     nparam = times.size - 1  # epoch zero is the explicit zero reference
