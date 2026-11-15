@@ -115,7 +115,12 @@ class DatasetAvailability(BaseModel):
 class PlotGUNWAvailability(BaseModel):
     plot_id: str
     status: Literal[
-        "available", "source_available", "not_available", "check_failed", "not_checked"
+        "available",
+        "source_available",
+        "not_available",
+        "check_failed",
+        "not_checked",
+        "checking",
     ]
     matched_product_count: int = Field(default=0, ge=0)
     archived_gunw_product_count: int = Field(default=0, ge=0)
@@ -134,6 +139,7 @@ class GUNWAvailability(BaseModel):
         "not_available",
         "check_failed",
         "not_checked",
+        "checking",
     ]
     provider: str = "NASA Alaska Satellite Facility DAAC"
     collection: str = "multiple ASF GUNW collections"

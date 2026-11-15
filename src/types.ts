@@ -87,7 +87,7 @@ export interface SelectionResponse {
   data_processing_consent: boolean;
   consent_recorded_at: string | null;
   gunw_availability: {
-    status: "available" | "partial" | "source_available" | "not_available" | "check_failed" | "not_checked";
+    status: "available" | "partial" | "source_available" | "not_available" | "check_failed" | "not_checked" | "checking";
     provider: string;
     collection: string;
     collections_checked: string[];
@@ -100,7 +100,7 @@ export interface SelectionResponse {
     earthdata_login_required_for_download: boolean;
     plot_results: Array<{
       plot_id: string;
-      status: "available" | "source_available" | "not_available" | "check_failed" | "not_checked";
+      status: "available" | "source_available" | "not_available" | "check_failed" | "not_checked" | "checking";
       matched_product_count: number;
       archived_gunw_product_count: number;
       source_scene_count: number;

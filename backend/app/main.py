@@ -16,6 +16,7 @@ from .models import (
     ErrorDetail,
     ErrorResponse,
     ForecastResult,
+    GUNWAvailability,
     ProcessingRun,
     SelectionCreate,
     SelectionResponse,
@@ -112,8 +113,17 @@ def health() -> dict[str, str]:
     responses={422: {"model": ErrorResponse}},
     tags=["selections"],
 )
-def create_selection(payload: SelectionCreate) -> SelectionResponse:
-    return SelectionResponse.from_record(service.create(payload))
+def create_selection(
+    payload: SelectionCreate,
+    background_tasks: BackgroundTasks,
+) -> SelectionResponse:
+    selection = service.create(payload)
+    if settings.gunw_catalog_enabled:
+        background_tasks.add_task(
+            service.refresh_gunw_availability,
+            selection.selection_id,
+        )
+    return SelectionResponse.from_record(selection)
 
 
 @app.get(
@@ -160,6 +170,26 @@ def refresh_gunw_availability(
         )
         return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
     return SelectionResponse.from_record(selection)
+
+
+@app.get(
+    "/api/v1/selections/{selection_id}/gunw-availability",
+    response_model=GUNWAvailability,
+    responses={404: {"model": ErrorResponse}},
+    tags=["satellite availability"],
+)
+def get_gunw_availability(selection_id: str) -> GUNWAvailability | JSONResponse:
+    selection = service.get(selection_id)
+    if selection is None or selection.gunw_availability is None:
+        payload = ErrorResponse(
+            error=ErrorDetail(
+                code="selection_not_found",
+                message="No saved farm exists with that ID.",
+                hint="Check the selection ID and try again.",
+            )
+        )
+        return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
+    return selection.gunw_availability
 
 
 @app.post(

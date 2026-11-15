@@ -5,9 +5,15 @@ from uuid import uuid4
 
 from .config import Settings
 from .geometry import validate_and_normalize_geometry
-from .models import PlotRecord, SelectionCreate, SpatialSelection
+from .models import (
+    GUNWAvailability,
+    PlotGUNWAvailability,
+    PlotRecord,
+    SelectionCreate,
+    SpatialSelection,
+)
 from .repository import SelectionRepository
-from .satellite import GUNWCatalog
+from .satellite import CHECK_FAILED_MESSAGE, GUNWCatalog
 
 
 class SelectionService:
@@ -46,6 +52,22 @@ class SelectionService:
                     area=plot.area,
                 )
             )
+        availability = (
+            GUNWAvailability(
+                status="checking",
+                message="Checking satellite imagery availability in the background.",
+                plot_results=[
+                    PlotGUNWAvailability(
+                        plot_id=plot.plot_id,
+                        status="checking",
+                        message="Checking imagery availability for this plot.",
+                    )
+                    for plot in plots
+                ],
+            )
+            if self._settings.gunw_catalog_enabled
+            else self._gunw_catalog.check(plots)
+        )
         selection = SpatialSelection(
             selection_id=selection_id,
             geometry=validated.geometry,
@@ -61,7 +83,7 @@ class SelectionService:
             farm_profile=payload.farm_profile,
             data_processing_consent=payload.data_processing_consent,
             consent_recorded_at=datetime.now(UTC),
-            gunw_availability=self._gunw_catalog.check(plots),
+            gunw_availability=availability,
             created_at=datetime.now(UTC),
         )
         return self._repository.save(selection)
@@ -73,7 +95,22 @@ class SelectionService:
         selection = self._repository.get(selection_id)
         if selection is None:
             return None
+        try:
+            availability = self._gunw_catalog.check(selection.plots)
+        except Exception:
+            availability = GUNWAvailability(
+                status="check_failed",
+                message=CHECK_FAILED_MESSAGE,
+                plot_results=[
+                    PlotGUNWAvailability(
+                        plot_id=plot.plot_id,
+                        status="check_failed",
+                        message=CHECK_FAILED_MESSAGE,
+                    )
+                    for plot in selection.plots
+                ],
+            )
         updated = selection.model_copy(
-            update={"gunw_availability": self._gunw_catalog.check(selection.plots)}
+            update={"gunw_availability": availability}
         )
         return self._repository.save(updated)

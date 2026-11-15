@@ -175,6 +175,11 @@ def test_farmer_profile_and_satellite_status_are_saved() -> None:
     assert saved["data_processing_consent"] is True
     assert saved["consent_recorded_at"]
     assert saved["gunw_availability"]["status"] == "not_checked"
+    availability = client.get(
+        f"/api/v1/selections/{saved['selection_id']}/gunw-availability"
+    )
+    assert availability.status_code == 200
+    assert availability.json()["status"] == "not_checked"
 
 
 def test_technical_records_are_protected_when_key_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:

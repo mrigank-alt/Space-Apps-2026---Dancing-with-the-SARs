@@ -3,7 +3,7 @@ import { FarmMap, type FarmMapHandle } from "./components/FarmMap";
 import { AssessmentPanel } from "./components/AssessmentPanel";
 import { FarmProfileForm, type FarmFormValues } from "./components/FarmProfileForm";
 import { LocationSearch } from "./components/LocationSearch";
-import { createSelection, getAssessment, getProcessingRun, getSelection, listAssessments, startProcessing } from "./lib/api";
+import { createSelection, getAssessment, getGunwAvailability, getProcessingRun, getSelection, listAssessments, startProcessing } from "./lib/api";
 import { getMapConfiguration } from "./lib/config";
 import { boundaryArea, boundaryPlotAreas, formatArea } from "./lib/geometry";
 import type {
@@ -58,6 +58,8 @@ export default function App() {
       && farmForm.waterSource
       && farmForm.consent,
   );
+  const confirmedSelectionId = confirmed?.selection_id;
+  const availabilityStatus = confirmed?.gunw_availability?.status;
 
   useEffect(() => {
     if (!confirmed) return;
@@ -92,6 +94,34 @@ export default function App() {
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [processingRun]);
+
+  useEffect(() => {
+    if (!confirmedSelectionId || availabilityStatus !== "checking") return;
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempts = 0;
+
+    const pollAvailability = async () => {
+      attempts += 1;
+      try {
+        const availability = await getGunwAvailability(confirmedSelectionId);
+        if (cancelled) return;
+        setConfirmed((current) => current?.selection_id === confirmedSelectionId
+          ? { ...current, gunw_availability: availability }
+          : current);
+        if (availability.status !== "checking") return;
+      } catch {
+        if (cancelled) return;
+      }
+      if (attempts < 150) timer = window.setTimeout(pollAvailability, 2000);
+    };
+
+    timer = window.setTimeout(pollAvailability, 1200);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [availabilityStatus, confirmedSelectionId]);
 
   useEffect(() => {
     if (processingRun?.status !== "completed" || !processingRun.assessment_id) return;
@@ -412,7 +442,7 @@ export default function App() {
                   {submitting ? "Saving your farm…" : `Save ${plotCount} ${plotCount === 1 ? "plot" : "plots"}`}
                   <span aria-hidden="true">→</span>
                 </button>
-                <small>We’ll save your farm and check whether suitable satellite imagery is available.</small>
+                <small>Your farm saves immediately. We’ll check satellite imagery in the background.</small>
               </>
             )}
             {boundary && !profileComplete && !confirmed && (
@@ -445,7 +475,9 @@ export default function App() {
                           ? "Satellite imagery found"
                           : confirmed.gunw_availability.status === "not_available"
                             ? "Imagery is not available yet"
-                            : "Availability check pending"}
+                            : confirmed.gunw_availability.status === "checking"
+                              ? "Checking satellite imagery…"
+                              : "Availability check pending"}
                       </strong>
                     </div>
                     <p>
@@ -453,7 +485,9 @@ export default function App() {
                         ? "We found imagery that covers your land. Your saved plots are ready for the next step."
                         : confirmed.gunw_availability.status === "not_available"
                           ? "Your farm is saved. We couldn’t find suitable imagery for this land right now."
-                          : "Your farm is saved. We’ll need to check imagery availability again later."}
+                          : confirmed.gunw_availability.status === "checking"
+                            ? "You can continue using the app while we check coverage for your plots."
+                            : "Your farm is saved. We’ll need to check imagery availability again later."}
                     </p>
                     <div className="plot-coverage-list">
                       {confirmed.gunw_availability.plot_results.map((result, index) => (

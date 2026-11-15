@@ -65,6 +65,16 @@ export async function getSelection(selectionId: string): Promise<SelectionRespon
   return (await response.json()) as SelectionResponse;
 }
 
+export async function getGunwAvailability(
+  selectionId: string,
+): Promise<NonNullable<SelectionResponse["gunw_availability"]>> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/selections/${selectionId}/gunw-availability`,
+  );
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as NonNullable<SelectionResponse["gunw_availability"]>;
+}
+
 export async function getAssessment(assessmentId: string): Promise<Assessment> {
   const response = await fetch(`${API_BASE_URL}/api/v1/assessments/${assessmentId}`);
   if (!response.ok) throw await responseError(response);
