@@ -147,7 +147,15 @@ export interface ProcessingRun {
     pair_count?: number | null;
     epoch_count?: number | null;
     reliable_pixel_fraction?: number | null;
+    median_los_displacement_change_cm?: number | null;
     median_velocity_los_cm_year?: number | null;
+    measurement_interval?: {
+      start?: string | null;
+      end?: string | null;
+      elapsed_days?: number | null;
+      delta_definition?: string | null;
+    } | null;
+    phase_processing?: string | null;
   } | null;
 }
 

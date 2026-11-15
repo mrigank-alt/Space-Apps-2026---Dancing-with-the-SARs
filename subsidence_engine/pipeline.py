@@ -60,8 +60,6 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
     source_metrics: dict[str, Any] = {}
     legacy_rate = None
     cfg = config if isinstance(config, PipelineConfig) else PipelineConfig.model_validate(config)
-    if not cfg.remove_ramp:
-        raise NotImplementedError("The current source screening stack always removes a robust ramp; ramp-free processing is not available yet.")
     if cfg.reference_point is not None:
         raise NotImplementedError("Reference-point override is not wired into the source screening stage yet.")
     geojson = cfg.geometry
@@ -101,6 +99,8 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
                     shutil.copy2(cached, target)
         command = [sys.executable, str(script), "--output", str(source_dir), "--cache-dir", str(cache_dir),
                    "--no-plots", "--serial", "--engine-export-only"]
+        if not cfg.remove_ramp:
+            command += ["--no-remove-ramp"]
         if selection_id:
             command += ["--selection-id", selection_id]
         else:
@@ -137,6 +137,9 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
                 legacy_rate = legacy["rate_cm_year"].astype(np.float32)
     with np.load(stack_path, allow_pickle=False) as z:
         data = {key: z[key] for key in z.files}
+    phase_processing = str(data.get("phase_processing", "unknown_preprocessed_input"))
+    if phase_processing == "unknown_preprocessed_input":
+        log.warning("Input stack has no phase-processing provenance. Regenerate from cached clips to apply reference-only ramp fitting.")
     if "pair_coherence" not in data:
         data["pair_coherence"] = np.full_like(data["pair_displacement_cm"], np.nan, dtype=np.float32)
     if "incidence_angle_deg" not in data:
@@ -196,6 +199,9 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
     vertical_displacement_sigma = np.divide(result.displacement_sigma_cm, vertical_scale[None, :, :],
                                             out=np.full_like(result.displacement_sigma_cm, np.nan),
                                             where=has_incidence[None, :, :])
+    # Observed interval change, not annual velocity multiplied by requested dates.
+    los_change = result.displacement_cm[-1] - result.displacement_cm[0]
+    vertical_change = vertical_displacement[-1] - vertical_displacement[0]
     reliability = (result.connected & (coherence >= 0.4) & (result.valid_pair_count >= cfg.minimum_valid_pairs)
                    & (valid_fraction >= cfg.reliability_min_valid_fraction))
     # A tree network yields point estimates but cannot estimate a residual variance.
@@ -236,7 +242,9 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
               "vertical_velocity_sigma_cm_year_1sigma", "incidence_angle_deg", "coherence_mean",
               "valid_pair_count", "valid_time_fraction", "quality_mask", "uncertainty_available",
               "differential_los_cm_year_per_km", "differential_subsidence_cm_year_per_km", "acceleration_cm_year2",
-              "seasonal_velocity_cm_year", "long_term_velocity_cm_year"]
+              "seasonal_velocity_cm_year", "long_term_velocity_cm_year",
+              "los_displacement_change_cm", "vertical_displacement_change_cm",
+              "measurement_start", "measurement_end"]
     fields += [f"cumulative_los_cm_{d}" for d in epoch_labels]
     fields += [f"cumulative_vertical_cm_{d}" for d in epoch_labels]
     fields += [f"cumulative_los_sigma_cm_{d}_1sigma" for d in epoch_labels]
@@ -253,7 +261,8 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
                              vertical_velocity[r, c], vertical_velocity_sigma[r, c], incidence[r, c], coherence[r, c],
                              int(result.valid_pair_count[r, c]), valid_fraction[r, c], int(reliability[r, c]),
                              int(uncertainty_available[r, c]), gradient_los[r, c], gradient_vertical[r, c],
-                             acc, seasonal, long_term, *result.displacement_cm[:, r, c].tolist(),
+                             acc, seasonal, long_term, los_change[r, c], vertical_change[r, c],
+                             epoch_labels[0], epoch_labels[-1], *result.displacement_cm[:, r, c].tolist(),
                              *vertical_displacement[:, r, c].tolist(),
                              *result.displacement_sigma_cm[:, r, c].tolist(),
                              *vertical_displacement_sigma[:, r, c].tolist()])
@@ -279,6 +288,7 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
         "reliable_pixels": int(reliable_in_aoi.sum()),
         "reliable_pixel_fraction": float(reliable_in_aoi.sum() / max(mask.sum(), 1)),
         "median_velocity_los_cm_year": float(np.nanmedian(result.velocity_cm_year[mask])) if np.isfinite(result.velocity_cm_year[mask]).any() else None,
+        "median_los_displacement_change_cm": float(np.nanmedian(los_change[mask])) if np.isfinite(los_change[mask]).any() else None,
         "median_velocity_sigma_1sigma_cm_year": float(np.nanmedian(result.velocity_sigma_cm_year[mask])) if np.isfinite(result.velocity_sigma_cm_year[mask]).any() else None,
         "median_fit_residual_rms_cm": float(np.nanmedian(result.residual_rms_cm[mask])) if np.isfinite(result.residual_rms_cm[mask]).any() else None,
     }
@@ -343,6 +353,9 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
         "accuracy_benchmark": comparison,
         "quality_summary": quality_summary,
         "requested_date_range": {"start_inclusive": cfg.start_date, "end_exclusive": cfg.end_date},
+        "measurement_interval": {"start": epoch_labels[0], "end": epoch_labels[-1],
+                                 "elapsed_days": float(data["epoch_days"][-1] - data["epoch_days"][0]),
+                                 "delta_definition": "last observed epoch minus first observed epoch; relative LOS cm"},
         "pair_network": {"pair_count": int(len(data["pair_start"])), "epoch_count": int(len(dates)),
                          "incidence_rank": network_rank, "connected_components": network_components,
                          "independent_cycle_count": network_cycle_rank,
@@ -350,7 +363,13 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
         "layers": layer_meta, "cube": str(cube_path.relative_to(run_dir)) if cube_path else None,
         "config_sha256": config_hash, "software": {"python": platform.python_version(), "numpy": np.__version__, "rasterio": rasterio.__version__},
         "processing": {"solver": "batched weighted SBAS grouped by valid-pair mask", "minimum_valid_pairs": cfg.minimum_valid_pairs,
-                       "phase_sign": cfg.phase_sign, "ramp_removal": cfg.remove_ramp},
+                       "phase_sign": float(data["phase_sign"]) if "phase_sign" in data else None,
+                       "phase_processing": phase_processing,
+                       "ramp_removal": (True if phase_processing == "reference_only_ramp" else
+                                        False if phase_processing == "reference_only_offset" else None),
+                       "ramp_removal_requested": cfg.remove_ramp,
+                       "reference": ("exterior annulus; stability is not independently verified"
+                                     if phase_processing.startswith("reference_only_") else "unknown preprocessed input")},
         "known_limitations": ["GUNW search and spatial subset retrieval still depend on ASF/Harmony network latency.",
                               "Harmony did not expose the GUNW 3-D incidence-angle metadata cube as a raster; vertical fields are null and LOS fields are supplied.",
                               "The 9-pair/10-epoch network has zero independent cycles; formal uncertainty fields are null.",

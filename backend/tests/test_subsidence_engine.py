@@ -90,6 +90,19 @@ def test_pipeline_writes_cogs_zarr_manifest_and_zonal_stats(tmp_path):
     assert len(manifest["layers"]) == 7
     assert (tmp_path / manifest["run_dir"] / "cube" / "timeseries.zarr").exists()
     loaded_manifest = json.loads((tmp_path / manifest["run_dir"] / "manifest.json").read_text())
+    assert loaded_manifest["measurement_interval"] == {
+        "start": "0.0",
+        "end": "360.0",
+        "elapsed_days": 360.0,
+        "delta_definition": "last observed epoch minus first observed epoch; relative LOS cm",
+    }
+    assert loaded_manifest["quality_summary"]["median_los_displacement_change_cm"] == pytest.approx(
+        0.5 * 360 / 365.25, abs=1e-4
+    )
+    assert loaded_manifest["processing"]["phase_processing"] == "unknown_preprocessed_input"
+    heatmap_header = (tmp_path / manifest["run_dir"] / "heatmap_pixels.csv").read_text().splitlines()[0]
+    assert "los_displacement_change_cm" in heatmap_header
+    assert "measurement_start" in heatmap_header
     stats = zonal_stats(loaded_manifest, geometry, ["mean_velocity_los"])
     assert stats["layers"]["mean_velocity_los"]["mean"] == pytest.approx(0.5, abs=1e-4)
 

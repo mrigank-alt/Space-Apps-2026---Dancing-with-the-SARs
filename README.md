@@ -98,6 +98,21 @@ The saved record at `/api/v1/selections/{selection_id}` is the handoff package f
 
 When archived GUNW imagery is found, the farmer interface offers **Prepare satellite results**. The frontend creates a durable processing run and polls its status. The backend passes the saved selection directly into the integrated GUNW screening and SBAS engine. A completed run contains `heatmap_pixels.csv`, GeoTIFF layers, a Zarr displacement cube, validation metrics, and `manifest.json`. These are subsidence-analysis inputs for a later visualization/risk module; they are not themselves a groundwater-risk score.
 
+### Signal-preserving GUNW processing
+
+The processing engine fits the spatial phase ramp only on coherent pixels in the exterior reference annulus, not on the selected farm. This prevents the screening step from accidentally fitting away a broad deformation gradient across the land. If the exterior reference area cannot support the fit, that pair is left missing instead of silently using the farm as its reference.
+
+Each exported pair stack records its phase-processing method and sign convention. The heat-map CSV and run manifest also report the actual first and last observed epochs plus the LOS displacement change between them. This value is the last observed epoch minus the first observed epoch; it is not an annual extrapolation. Existing cached raw clips can be reprocessed without another download, but pair stacks made by the older global-ramp implementation must be regenerated.
+
+The numerical regression suite covers signed motion, broad gradients, weak reference support, disconnected networks, and end-to-end phase-to-SBAS recovery. It verifies the implementation with synthetic truth; it does not establish accuracy for a real farm. Real-world conclusions still require independent measurements and confirmation that the exterior reference area is stable.
+
+Run the focused checks with:
+
+```bash
+backend/.venv/bin/python backend/tests/test_los_signal_preservation.py
+backend/.venv/bin/python backend/tests/test_los_signal_preservation.py --benchmark
+```
+
 ## API example
 
 Request:

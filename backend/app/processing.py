@@ -79,9 +79,14 @@ class GUNWProcessingService:
                 "reliable_pixel_fraction": (manifest.get("quality_summary") or {}).get(
                     "reliable_pixel_fraction"
                 ),
+                "median_los_displacement_change_cm": (manifest.get("quality_summary") or {}).get(
+                    "median_los_displacement_change_cm"
+                ),
                 "median_velocity_los_cm_year": (manifest.get("quality_summary") or {}).get(
                     "median_velocity_los_cm_year"
                 ),
+                "measurement_interval": manifest.get("measurement_interval"),
+                "phase_processing": (manifest.get("processing") or {}).get("phase_processing"),
             }
             completed = started.model_copy(
                 update={
