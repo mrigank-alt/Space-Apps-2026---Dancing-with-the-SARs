@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import platform
 
 SERVICE_NAME = "groundsignal-nisar"
 TOKEN_KEY = "earthdata-user-token"
@@ -21,7 +22,8 @@ def store_token() -> None:
     if not token:
         raise RuntimeError("No token entered; nothing was stored.")
     _keyring().set_password(SERVICE_NAME, TOKEN_KEY, token)
-    print("Earthdata token saved in the Windows credential vault.")
+    vault_name = "macOS Keychain" if platform.system() == "Darwin" else "operating-system credential vault"
+    print(f"Earthdata token saved in the {vault_name}.")
 
 
 def clear_token() -> None:
