@@ -31,3 +31,6 @@ class SelectionService:
 
     def get(self, selection_id: str) -> SpatialSelection | None:
         return self._repository.get(selection_id)
+
+    def latest(self) -> SpatialSelection | None:
+        return self._repository.latest()

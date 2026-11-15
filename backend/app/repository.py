@@ -14,6 +14,8 @@ class SelectionRepository(Protocol):
 
     def get(self, selection_id: str) -> SpatialSelection | None: ...
 
+    def latest(self) -> SpatialSelection | None: ...
+
     def intersecting(
         self, bbox: tuple[float, float, float, float]
     ) -> list[SpatialSelection]: ...
@@ -34,6 +36,10 @@ class InMemorySelectionRepository:
     def get(self, selection_id: str) -> SpatialSelection | None:
         with self._lock:
             return self._items.get(selection_id)
+
+    def latest(self) -> SpatialSelection | None:
+        with self._lock:
+            return next(reversed(self._items.values()), None) if self._items else None
 
     def intersecting(
         self, bbox: tuple[float, float, float, float]
@@ -128,6 +134,13 @@ class SQLiteSelectionRepository:
                 "INSERT INTO selection_bounds VALUES (?, ?, ?, ?, ?)",
                 (cursor.lastrowid, west, east, south, north),
             )
+            # Keep only the just-confirmed boundary as the active GeoJSON.
+            self._connection.execute(
+                "DELETE FROM selection_bounds WHERE id != ?", (cursor.lastrowid,)
+            )
+            self._connection.execute(
+                "DELETE FROM selections WHERE id != ?", (cursor.lastrowid,)
+            )
         return selection
 
     def get(self, selection_id: str) -> SpatialSelection | None:
@@ -135,6 +148,13 @@ class SQLiteSelectionRepository:
             row = self._connection.execute(
                 "SELECT record_json FROM selections WHERE selection_id = ?",
                 (selection_id,),
+            ).fetchone()
+        return self._record(row)
+
+    def latest(self) -> SpatialSelection | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT record_json FROM selections ORDER BY created_at DESC, id DESC LIMIT 1"
             ).fetchone()
         return self._record(row)
 

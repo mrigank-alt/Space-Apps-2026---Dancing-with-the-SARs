@@ -42,6 +42,19 @@ def test_selection_survives_repository_recreation(tmp_path) -> None:
     assert restored.area.hectares == 1
 
 
+def test_saving_new_selection_replaces_previous_and_keeps_latest(tmp_path) -> None:
+    repository = SQLiteSelectionRepository(str(tmp_path / "latest.sqlite3"))
+    first = selection()
+    second = first.model_copy(update={"selection_id": "sel_newest", "label": "Latest field"})
+
+    repository.save(first)
+    repository.save(second)
+
+    assert repository.get(first.selection_id) is None
+    assert repository.latest() == second
+    assert [item.selection_id for item in repository.intersecting((-1, -1, 2, 2))] == ["sel_newest"]
+
+
 def test_rtree_finds_only_intersecting_selections(tmp_path) -> None:
     repository = SQLiteSelectionRepository(str(tmp_path / "spatial.sqlite3"))
     repository.save(selection())

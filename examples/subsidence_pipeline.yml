@@ -1,0 +1,8 @@
+aoi_id: IranLand
+selection_id: sel_e7e505f07cc04f34b5f55de094351821
+output_root: outputs
+# pair_stack_npz may point to an already prepared stack. If omitted, the CLI invokes
+# the existing NISAR GUNW downloader/screener and consumes its additive handoff NPZ.
+minimum_valid_pairs: 3
+phase_sign: 1.0
+remove_ramp: true

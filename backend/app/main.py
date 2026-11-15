@@ -86,6 +86,26 @@ def create_selection(payload: SelectionCreate) -> SelectionResponse:
 
 
 @app.get(
+    "/api/v1/selections/latest",
+    response_model=SelectionResponse,
+    responses={404: {"model": ErrorResponse}},
+    tags=["selections"],
+)
+def get_latest_selection() -> SelectionResponse | JSONResponse:
+    selection = service.latest()
+    if selection is None:
+        payload = ErrorResponse(
+            error=ErrorDetail(
+                code="selection_not_found",
+                message="No saved selection exists yet.",
+                hint="Draw and confirm a boundary first.",
+            )
+        )
+        return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
+    return SelectionResponse.from_record(selection)
+
+
+@app.get(
     "/api/v1/selections/{selection_id}",
     response_model=SelectionResponse,
     responses={404: {"model": ErrorResponse}},

@@ -1,0 +1,10 @@
+aoi_id: TestData
+selection_id: latest
+output_root: outputs
+start_date: "2026-06-01"
+# The end date is exclusive, so this includes acquisitions through October 31.
+end_date: "2026-11-01"
+minimum_valid_pairs: 3
+phase_sign: 1.0
+remove_ramp: true
+csv_only: true

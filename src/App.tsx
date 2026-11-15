@@ -25,7 +25,10 @@ export default function App() {
   const [confirmed, setConfirmed] = useState<SelectionResponse | null>(null);
   const [selectionName, setSelectionName] = useState("");
 
-  const area = boundary ? boundaryArea(boundary) : null;
+  // Confirmation toggles submitting/confirmed state without changing the
+  // geometry. Cache Turf's full polygon-area pass so a detailed freehand
+  // boundary is not traversed again on every unrelated render.
+  const area = useMemo(() => (boundary ? boundaryArea(boundary) : null), [boundary]);
 
   function beginDraw(tool: "polygon" | "freehand" | "rectangle") {
     if (boundary) mapRef.current?.clear();
@@ -288,7 +291,7 @@ export default function App() {
               <div className="confirmation-card" role="status">
                 <div className="confirmation-heading"><span>✓</span><strong>Boundary confirmed</strong></div>
                 <h3>{confirmed.label}</h3>
-                <p>Saved persistently and ready for future spatial queries.</p>
+                <p>This is the active saved boundary. Confirming another boundary replaces it.</p>
                 <small className="confirmation-id-label">Selection ID · used to retrieve this boundary later</small>
                 <code>{confirmed.selection_id}</code>
                 <div className="confirmation-metrics">
