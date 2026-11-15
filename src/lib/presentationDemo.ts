@@ -1,61 +1,156 @@
-import type { Polygon } from "geojson";
+import type { Feature, Polygon } from "geojson";
 import type { Assessment, ConcernLevel, ConcernZoneProperties, SearchResult, SelectionResponse } from "../types";
+
+type Coordinate = [number, number];
+
+const farmRing: Coordinate[] = [
+  [-120.224, 36.617],
+  [-120.211, 36.624],
+  [-120.196, 36.622],
+  [-120.187, 36.613],
+  [-120.192, 36.600],
+  [-120.210, 36.596],
+  [-120.225, 36.605],
+  [-120.224, 36.617],
+];
 
 const farmGeometry: Polygon = {
   type: "Polygon",
-  coordinates: [[
-    [-120.220, 36.620],
-    [-120.190, 36.620],
-    [-120.190, 36.600],
-    [-120.220, 36.600],
-    [-120.220, 36.620],
-  ]],
+  coordinates: [farmRing],
 };
 
-const levels: Array<{
-  level: ConcernLevel;
-  west: number;
-  east: number;
+function clipEdge(
+  points: Coordinate[],
+  inside: (point: Coordinate) => boolean,
+  intersection: (start: Coordinate, end: Coordinate) => Coordinate,
+): Coordinate[] {
+  if (!points.length) return [];
+  const result: Coordinate[] = [];
+  let start = points[points.length - 1];
+  for (const end of points) {
+    const startInside = inside(start);
+    const endInside = inside(end);
+    if (endInside) {
+      if (!startInside) result.push(intersection(start, end));
+      result.push(end);
+    } else if (startInside) {
+      result.push(intersection(start, end));
+    }
+    start = end;
+  }
+  return result;
+}
+
+function verticalIntersection(x: number, start: Coordinate, end: Coordinate): Coordinate {
+  const span = end[0] - start[0];
+  const ratio = span === 0 ? 0 : (x - start[0]) / span;
+  return [x, start[1] + ratio * (end[1] - start[1])];
+}
+
+function horizontalIntersection(y: number, start: Coordinate, end: Coordinate): Coordinate {
+  const span = end[1] - start[1];
+  const ratio = span === 0 ? 0 : (y - start[1]) / span;
+  return [start[0] + ratio * (end[0] - start[0]), y];
+}
+
+function clipFarmToCell(west: number, south: number, east: number, north: number): Coordinate[] {
+  let points = farmRing.slice(0, -1);
+  points = clipEdge(points, ([x]) => x >= west, (a, b) => verticalIntersection(west, a, b));
+  points = clipEdge(points, ([x]) => x <= east, (a, b) => verticalIntersection(east, a, b));
+  points = clipEdge(points, ([, y]) => y >= south, (a, b) => horizontalIntersection(south, a, b));
+  points = clipEdge(points, ([, y]) => y <= north, (a, b) => horizontalIntersection(north, a, b));
+  return points.length >= 3 ? [...points, points[0]] : [];
+}
+
+const redCells = new Set(["3:2", "4:2", "4:3"]);
+const yellowCells = new Set(["2:1", "3:1", "4:1", "2:2", "5:2", "2:3", "3:3", "5:3", "3:4", "4:4"]);
+
+function cellLevel(column: number, row: number): ConcernLevel {
+  const key = `${column}:${row}`;
+  if (redCells.has(key)) return "red";
+  if (yellowCells.has(key)) return "yellow";
+  return "green";
+}
+
+const levelDetails: Record<Exclude<ConcernLevel, "grey">, {
   label: string;
   explanation: string;
   velocity: number;
   change: number;
-}> = [
-  {
-    level: "green",
-    west: -120.220,
-    east: -120.210,
+}> = {
+  green: {
     label: "Looks steady",
     explanation: "This area stayed close to the farm baseline during the sample period.",
     velocity: -0.3,
     change: -0.2,
   },
-  {
-    level: "yellow",
-    west: -120.210,
-    east: -120.200,
+  yellow: {
     label: "Needs a closer look",
     explanation: "This sample area shows persistent movement worth checking in the field.",
     velocity: -2.1,
     change: -1.4,
   },
-  {
-    level: "red",
-    west: -120.200,
-    east: -120.190,
+  red: {
     label: "Needs prompt attention",
     explanation: "This sample area shows stronger persistent movement and should be inspected promptly.",
     velocity: -4.8,
     change: -3.2,
   },
-];
+};
+
+function buildConcernGrid(): Array<Feature<Polygon, ConcernZoneProperties>> {
+  const west = -120.225;
+  const south = 36.596;
+  const east = -120.187;
+  const north = 36.624;
+  const columns = 6;
+  const rows = 5;
+  const width = (east - west) / columns;
+  const height = (north - south) / rows;
+  const features: Array<Feature<Polygon, ConcernZoneProperties>> = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const cellWest = west + column * width;
+      const cellEast = cellWest + width;
+      const cellSouth = south + row * height;
+      const cellNorth = cellSouth + height;
+      const ring = clipFarmToCell(cellWest, cellSouth, cellEast, cellNorth);
+      if (!ring.length) continue;
+      const concernLevel = cellLevel(column, row) as Exclude<ConcernLevel, "grey">;
+      const details = levelDetails[concernLevel];
+      features.push({
+        type: "Feature",
+        geometry: { type: "Polygon", coordinates: [ring] },
+        properties: {
+          zone_id: `demo_cell_${row}_${column}`,
+          plot_id: "demo_plot_001",
+          plot_index: 1,
+          concern_level: concernLevel,
+          label: details.label,
+          explanation: details.explanation,
+          los_velocity_cm_year: details.velocity - row * 0.03,
+          observed_los_change_cm: details.change - column * 0.02,
+          persistence_fraction: concernLevel === "green" ? 0.62 : 0.82,
+          coherence: 0.76,
+          uncertainty_available: true,
+          measurement_start: "2026-04-01",
+          measurement_end: "2026-10-01",
+        },
+      });
+    }
+  }
+  return features;
+}
+
+const concernGrid = buildConcernGrid();
 
 export const PRESENTATION_DEMO_LOCATION: SearchResult = {
   id: "presentation-demo",
   label: "Sample farm near San Joaquin, California",
   context: "Presentation demo · simulated results",
-  center: [-120.205, 36.610],
-  bbox: [-120.220, 36.600, -120.190, 36.620],
+  center: [-120.206, 36.610],
+  bbox: [-120.225, 36.596, -120.187, 36.624],
   kind: "demo",
 };
 
@@ -63,19 +158,19 @@ export const PRESENTATION_DEMO_SELECTION: SelectionResponse = {
   selection_id: "demo_presentation_farm",
   label: "Sample Valley Farm — Demo",
   geometry: farmGeometry,
-  bbox: [-120.220, 36.600, -120.190, 36.620],
-  centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.205, 36.610] }, properties: {} },
-  reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.205, 36.610] }, properties: {} },
-  area: { square_meters: 5_930_000, hectares: 593, acres: 1_465.3 },
+  bbox: [-120.225, 36.596, -120.187, 36.624],
+  centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
+  reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
+  area: { square_meters: 6_680_000, hectares: 668, acres: 1_650.7 },
   plot_count: 1,
   plots: [{
     plot_id: "demo_plot_001",
     plot_index: 1,
     geometry: farmGeometry,
-    bbox: [-120.220, 36.600, -120.190, 36.620],
-    centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.205, 36.610] }, properties: {} },
-    reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.205, 36.610] }, properties: {} },
-    area: { square_meters: 5_930_000, hectares: 593, acres: 1_465.3 },
+    bbox: [-120.225, 36.596, -120.187, 36.624],
+    centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
+    reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
+    area: { square_meters: 6_680_000, hectares: 668, acres: 1_650.7 },
   }],
   farmer: { operator_name: "Sample Farmer", contact_email: "demo@example.com" },
   farm_profile: {
@@ -130,40 +225,13 @@ export const PRESENTATION_DEMO_ASSESSMENT: Assessment = {
   evidence_quality: "moderate",
   concern_zones: {
     type: "FeatureCollection",
-    features: levels.map((item, index) => ({
-      type: "Feature",
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [item.west, 36.620],
-          [item.east, 36.620],
-          [item.east, 36.600],
-          [item.west, 36.600],
-          [item.west, 36.620],
-        ]],
-      },
-      properties: {
-        zone_id: `demo_zone_${index + 1}`,
-        plot_id: "demo_plot_001",
-        plot_index: 1,
-        concern_level: item.level,
-        label: item.label,
-        explanation: item.explanation,
-        los_velocity_cm_year: item.velocity,
-        observed_los_change_cm: item.change,
-        persistence_fraction: 0.82,
-        coherence: 0.76,
-        uncertainty_available: true,
-        measurement_start: "2026-04-01",
-        measurement_end: "2026-10-01",
-      } satisfies ConcernZoneProperties,
-    })),
+    features: concernGrid,
   },
   plot_summaries: [{
     plot_id: "demo_plot_001",
     plot_index: 1,
     overall_concern: "red",
-    pixel_counts: { green: 120, yellow: 95, red: 55, grey: 0 },
+    pixel_counts: { green: 17, yellow: 10, red: 3, grey: 0 },
   }],
   recommendations: [
     { priority: "prompt_review", title: "Walk the red area", detail: "Check for cracks, sinking, ponding, or damaged irrigation lines.", scope: "Red sample zone" },
