@@ -41,6 +41,7 @@ class Settings:
     gunw_product_sample_limit: int = 20
     environment: str = "development"
     technical_api_key: str | None = None
+    processing_output_root: str = "backend/data/processing"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -82,4 +83,7 @@ class Settings:
             ),
             environment=environment,
             technical_api_key=technical_api_key,
+            processing_output_root=os.getenv(
+                "PROCESSING_OUTPUT_ROOT", "backend/data/processing"
+            ),
         )

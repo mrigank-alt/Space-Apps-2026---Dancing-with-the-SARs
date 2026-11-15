@@ -253,6 +253,15 @@ button { color: inherit; }
 .satellite-result-heading > span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--forest); color: white; font-size: 9px; font-weight: 900; }
 .satellite-result-heading strong { color: var(--forest); font-size: 9px; }
 .satellite-result > p { margin: 7px 0 5px; color: #4d6258; font-size: 8px; line-height: 1.4; }
+.processing-panel { margin-top: 10px; }
+.prepare-results-button { width: 100%; padding: 10px; border: 0; border-radius: 3px; background: var(--forest); color: white; font: inherit; font-size: 8px; font-weight: 800; cursor: pointer; }
+.prepare-results-button:hover { background: #205a45; }
+.processing-status { padding: 10px; border: 1px solid #afc7b2; background: rgba(255,255,255,.72); }
+.processing-status strong { color: var(--forest); font-size: 9px; }
+.processing-status p { margin: 5px 0 0; color: #4d6258; font-size: 8px; line-height: 1.4; }
+.processing-status small { display: block; margin-top: 6px; color: #5d7468; font-size: 7px; }
+.processing-status.credentials_required { border-color: #d6c37f; background: #fff9e8; }
+.processing-status.failed { border-color: #dfa98f; background: #fff0e9; }
 .plot-coverage-list { margin-top: 7px; border-top: 1px solid rgba(49,83,66,.16); }
 .plot-coverage-list > div { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(49,83,66,.12); color: #4d6258; font-size: 7px; }
 .new-farm-button { width: 100%; margin-top: 10px; padding: 9px; border: 1px solid #6f8d7e; border-radius: 3px; background: white; color: var(--forest); font: inherit; font-size: 8px; font-weight: 800; cursor: pointer; }

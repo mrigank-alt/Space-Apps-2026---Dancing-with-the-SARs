@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FarmMap, type FarmMapHandle } from "./components/FarmMap";
 import { FarmProfileForm, type FarmFormValues } from "./components/FarmProfileForm";
 import { LocationSearch } from "./components/LocationSearch";
-import { createSelection } from "./lib/api";
+import { createSelection, getProcessingRun, startProcessing } from "./lib/api";
 import { getMapConfiguration } from "./lib/config";
 import { boundaryArea, boundaryPlotAreas, formatArea } from "./lib/geometry";
 import type {
   BoundaryFeature,
   DrawingTool,
+  ProcessingRun,
   SearchResult,
   SelectionResponse,
 } from "./types";
@@ -25,6 +26,8 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>();
   const [confirmed, setConfirmed] = useState<SelectionResponse | null>(null);
+  const [processingRun, setProcessingRun] = useState<ProcessingRun | null>(null);
+  const [processingError, setProcessingError] = useState<string>();
   const [farmForm, setFarmForm] = useState<FarmFormValues>({
     farmName: "",
     operatorName: "",
@@ -51,6 +54,18 @@ export default function App() {
     if (!confirmed) return;
     confirmationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [confirmed]);
+
+  useEffect(() => {
+    if (!processingRun || !["queued", "running"].includes(processingRun.status)) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        setProcessingRun(await getProcessingRun(processingRun.run_id));
+      } catch (error) {
+        setProcessingError(error instanceof Error ? error.message : "We could not check the analysis status.");
+      }
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [processingRun]);
 
   function beginDraw(tool: "polygon" | "freehand") {
     setConfirmed(null);
@@ -121,6 +136,8 @@ export default function App() {
         data_processing_consent: true,
       });
       setConfirmed(response);
+      setProcessingRun(null);
+      setProcessingError(undefined);
       setActiveTool("idle");
     } catch (error) {
       setSubmitError(
@@ -133,10 +150,22 @@ export default function App() {
     }
   }
 
+  async function prepareSatelliteResults() {
+    if (!confirmed) return;
+    setProcessingError(undefined);
+    try {
+      setProcessingRun(await startProcessing(confirmed.selection_id));
+    } catch (error) {
+      setProcessingError(error instanceof Error ? error.message : "The satellite analysis could not be started.");
+    }
+  }
+
   function clearSelection() {
     mapRef.current?.clear();
     setBoundary(null);
     setConfirmed(null);
+    setProcessingRun(null);
+    setProcessingError(undefined);
     setFarmForm({
       farmName: "",
       operatorName: "",
@@ -388,6 +417,34 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+                {confirmed.gunw_availability && confirmed.gunw_availability.archived_gunw_product_count > 0 && (
+                  <div className="processing-panel">
+                    {!processingRun ? (
+                      <button type="button" className="prepare-results-button" onClick={prepareSatelliteResults}>
+                        Prepare satellite results
+                      </button>
+                    ) : (
+                      <div className={`processing-status ${processingRun.status}`} role="status">
+                        <strong>
+                          {processingRun.status === "completed"
+                            ? "Satellite results are ready"
+                            : processingRun.status === "credentials_required"
+                              ? "Imagery confirmed"
+                              : processingRun.status === "no_data"
+                                ? "No imagery available yet"
+                                : processingRun.status === "failed"
+                                  ? "Analysis needs attention"
+                                  : "Preparing satellite results"}
+                        </strong>
+                        <p>{processingRun.message}</p>
+                        {processingRun.status === "completed" && processingRun.result_summary?.pair_count != null && (
+                          <small>{processingRun.result_summary.pair_count} image pairs were processed for this farm.</small>
+                        )}
+                      </div>
+                    )}
+                    {processingError && <div className="submit-error" role="alert">{processingError}</div>}
                   </div>
                 )}
                 <button type="button" className="new-farm-button" onClick={clearSelection}>

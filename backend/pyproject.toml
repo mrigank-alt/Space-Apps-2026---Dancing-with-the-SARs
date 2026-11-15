@@ -8,6 +8,15 @@ dependencies = [
   "pyproj>=3.7,<4.0",
   "shapely>=2.0,<3.0",
   "uvicorn[standard]>=0.34,<1.0",
+  "asf-search>=14.0,<15.0",
+  "harmony-py>=1.8,<2.0",
+  "numpy>=1.26",
+  "matplotlib>=3.8",
+  "rasterio>=1.4",
+  "requests>=2.32",
+  "keyring>=25.6,<27",
+  "zarr>=3.0,<4",
+  "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

@@ -148,6 +148,28 @@ class GUNWAvailability(BaseModel):
     earthdata_login_required_for_download: bool = True
 
 
+class ProcessingRun(BaseModel):
+    """Durable status for one GUNW-to-SBAS processing attempt."""
+
+    run_id: str
+    selection_id: str
+    status: Literal[
+        "queued",
+        "running",
+        "completed",
+        "no_data",
+        "credentials_required",
+        "failed",
+    ]
+    message: str
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    output_directory: str | None = None
+    result_summary: dict[str, Any] | None = None
+    error_detail: str | None = None
+
+
 class SpatialSelection(BaseModel):
     """Canonical geometry record consumed by later spatial-query modules."""
 

@@ -203,3 +203,28 @@ def test_technical_records_are_protected_when_key_is_configured(monkeypatch: pyt
         headers={"X-Technical-API-Key": "test-technical-key"},
     )
     assert authorized.status_code == 200
+
+
+def test_saved_boundary_can_start_and_retrieve_a_processing_run() -> None:
+    response = client.post(
+        "/api/v1/selections",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[-112.15, 49.79], [-112.14, 49.79], [-112.14, 49.78], [-112.15, 49.79]]],
+            },
+            "source": "drawn",
+            "label": "Processing flow farm",
+            **farmer_payload(),
+        },
+    )
+    selection_id = response.json()["selection_id"]
+
+    started = client.post(f"/api/v1/selections/{selection_id}/processing-runs")
+
+    assert started.status_code == 202
+    run_id = started.json()["run_id"]
+    fetched = client.get(f"/api/v1/processing-runs/{run_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["selection_id"] == selection_id
+    assert fetched.json()["status"] == "no_data"

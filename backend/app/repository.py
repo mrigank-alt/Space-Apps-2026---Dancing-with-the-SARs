@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Protocol
 
-from .models import PlotRecord, SpatialSelection
+from .models import PlotRecord, ProcessingRun, SpatialSelection
 
 
 class SelectionRepository(Protocol):
@@ -18,12 +18,17 @@ class SelectionRepository(Protocol):
         self, bbox: tuple[float, float, float, float]
     ) -> list[SpatialSelection]: ...
 
+    def save_processing_run(self, run: ProcessingRun) -> ProcessingRun: ...
+
+    def get_processing_run(self, run_id: str) -> ProcessingRun | None: ...
+
 
 class InMemorySelectionRepository:
     """Development repository with the same interface a durable store can implement."""
 
     def __init__(self) -> None:
         self._items: dict[str, SpatialSelection] = {}
+        self._processing_runs: dict[str, ProcessingRun] = {}
         self._lock = RLock()
 
     def save(self, selection: SpatialSelection) -> SpatialSelection:
@@ -48,6 +53,15 @@ class InMemorySelectionRepository:
                 and item.bbox[1] <= north
                 and item.bbox[3] >= south
             ]
+
+    def save_processing_run(self, run: ProcessingRun) -> ProcessingRun:
+        with self._lock:
+            self._processing_runs[run.run_id] = run
+        return run
+
+    def get_processing_run(self, run_id: str) -> ProcessingRun | None:
+        with self._lock:
+            return self._processing_runs.get(run_id)
 
 
 class SQLiteSelectionRepository:
@@ -94,6 +108,23 @@ class SQLiteSelectionRepository:
             )
             self._connection.execute(
                 "CREATE INDEX IF NOT EXISTS selections_label_idx ON selections(label)"
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS processing_runs (
+                    run_id TEXT PRIMARY KEY,
+                    selection_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(selection_id) REFERENCES selections(selection_id)
+                )
+                """
+            )
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS processing_runs_selection_idx "
+                "ON processing_runs(selection_id, created_at DESC)"
             )
 
     def save(self, selection: SpatialSelection) -> SpatialSelection:
@@ -196,6 +227,41 @@ class SQLiteSelectionRepository:
                 (east, west, north, south),
             ).fetchall()
         return [record for row in rows if (record := self._record(row)) is not None]
+
+    def save_processing_run(self, run: ProcessingRun) -> ProcessingRun:
+        payload = json.dumps(run.model_dump(mode="json"), separators=(",", ":"))
+        updated_at = (run.completed_at or run.started_at or run.created_at).isoformat()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO processing_runs (
+                    run_id, selection_id, status, record_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    status = excluded.status,
+                    record_json = excluded.record_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    run.run_id,
+                    run.selection_id,
+                    run.status,
+                    payload,
+                    run.created_at.isoformat(),
+                    updated_at,
+                ),
+            )
+        return run
+
+    def get_processing_run(self, run_id: str) -> ProcessingRun | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT record_json FROM processing_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ProcessingRun.model_validate(json.loads(row["record_json"]))
 
     @staticmethod
     def _record(row: sqlite3.Row | None) -> SpatialSelection | None:

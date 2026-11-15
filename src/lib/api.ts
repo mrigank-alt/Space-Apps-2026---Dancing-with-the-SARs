@@ -1,6 +1,7 @@
 import type {
   ApiErrorBody,
   BoundaryFeature,
+  ProcessingRun,
   SelectionCreateDetails,
   SelectionResponse,
 } from "../types";
@@ -31,4 +32,28 @@ export async function createSelection(
   }
 
   return (await response.json()) as SelectionResponse;
+}
+
+async function responseError(response: Response): Promise<Error> {
+  let body: ApiErrorBody = {};
+  try {
+    body = (await response.json()) as ApiErrorBody;
+  } catch {
+    // Use the status fallback when the server did not return JSON.
+  }
+  return new Error(body.error?.message || body.detail || `Request failed (${response.status}).`);
+}
+
+export async function startProcessing(selectionId: string): Promise<ProcessingRun> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/selections/${selectionId}/processing-runs`, {
+    method: "POST",
+  });
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as ProcessingRun;
+}
+
+export async function getProcessingRun(runId: string): Promise<ProcessingRun> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/processing-runs/${runId}`);
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as ProcessingRun;
 }

@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -13,10 +13,12 @@ from .errors import GeometryValidationError
 from .models import (
     ErrorDetail,
     ErrorResponse,
+    ProcessingRun,
     SelectionCreate,
     SelectionResponse,
 )
 from .repository import SQLiteSelectionRepository
+from .processing import GUNWProcessingService
 from .satellite import ASFGUNWCatalog, DisabledGUNWCatalog
 from .service import SelectionService
 
@@ -33,6 +35,7 @@ gunw_catalog = (
     else DisabledGUNWCatalog()
 )
 service = SelectionService(settings, repository, gunw_catalog)
+processing_service = GUNWProcessingService(repository, settings.processing_output_root)
 
 app = FastAPI(
     title="Groundsignal Farm Selection API",
@@ -153,3 +156,49 @@ def refresh_gunw_availability(
         )
         return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
     return SelectionResponse.from_record(selection)
+
+
+@app.post(
+    "/api/v1/selections/{selection_id}/processing-runs",
+    response_model=ProcessingRun,
+    response_model_exclude={"error_detail"},
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={404: {"model": ErrorResponse}},
+    tags=["satellite processing"],
+)
+def create_processing_run(
+    selection_id: str,
+    background_tasks: BackgroundTasks,
+) -> ProcessingRun | JSONResponse:
+    run = processing_service.queue(selection_id)
+    if run is None:
+        payload = ErrorResponse(
+            error=ErrorDetail(
+                code="selection_not_found",
+                message="No saved farm exists with that ID.",
+                hint="Save the farm boundary before preparing satellite results.",
+            )
+        )
+        return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
+    background_tasks.add_task(processing_service.execute, run.run_id)
+    return run
+
+
+@app.get(
+    "/api/v1/processing-runs/{run_id}",
+    response_model=ProcessingRun,
+    response_model_exclude={"error_detail"},
+    responses={404: {"model": ErrorResponse}},
+    tags=["satellite processing"],
+)
+def get_processing_run(run_id: str) -> ProcessingRun | JSONResponse:
+    run = processing_service.get(run_id)
+    if run is None:
+        payload = ErrorResponse(
+            error=ErrorDetail(
+                code="processing_run_not_found",
+                message="No satellite-analysis run exists with that ID.",
+            )
+        )
+        return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
+    return run

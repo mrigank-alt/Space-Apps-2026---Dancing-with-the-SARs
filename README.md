@@ -1,6 +1,6 @@
 # Groundsignal — farm monitoring intake
 
-Groundsignal collects a farmer's operating context, validates one or more farm-plot boundaries, stores a durable spatial record, and checks the NASA Alaska Satellite Facility archive for GUNW products and Sentinel-1 source coverage. It does **not** calculate groundwater risk, predict groundwater conditions, or make pumping recommendations.
+Groundsignal collects a farmer's operating context, validates one or more farm-plot boundaries, stores a durable spatial record, checks the NASA Alaska Satellite Facility archive for GUNW products, and can prepare georeferenced subsidence layers for later map work. It does **not** calculate groundwater risk, predict groundwater conditions, or make pumping recommendations.
 
 ## What is included
 
@@ -15,11 +15,12 @@ Groundsignal collects a farmer's operating context, validates one or more farm-p
 - FastAPI endpoint accepting GeoJSON `Polygon` and `MultiPolygon` geometry in EPSG:4326 longitude-latitude order
 - Coordinate, ring closure, validity, nonzero-area, and maximum-area validation
 - Named, persistent farm selections with normalized MultiPolygon geometry, combined spatial metadata, reusable selection ID, and stable per-plot IDs and measurements
-- Automatic per-plot checks for ARIA Sentinel-1 GUNW, NISAR Beta GUNW, NISAR Validated GUNW, NISAR Urgent Response GUNW, and Sentinel-1 SLC source scenes through the public NASA ASF Search API
+- Automatic per-plot checks for NISAR Provisional, Beta, Validated, and Urgent Response GUNW, ARIA Sentinel-1 GUNW, and Sentinel-1 SLC source scenes through the public NASA ASF Search API
 - Saved GUNW catalog status, exact match counts, and a bounded sample of product metadata and download URLs
+- Integrated GUNW download/screening and SBAS processing with durable run status, pixel CSV output, cloud-optimized GeoTIFF layers, a time-series cube, quality metrics, and a machine-readable run manifest
 - Frontend geometry tests, backend validation tests, catalog parsing tests, and drawing-to-API integration tests
 
-Selections are stored in `backend/data/selections.sqlite3`. The database keeps the canonical GeoJSON record and an SQLite R-tree bounding-box index for later candidate-scene and environmental-record queries. The repository interface can be replaced with PostGIS for a multi-user production deployment without changing the service layer.
+Selections and processing-run status are stored in `backend/data/selections.sqlite3`. The database keeps the canonical GeoJSON record and an SQLite R-tree bounding-box index for later candidate-scene and environmental-record queries. Generated raster/cube outputs are stored under `backend/data/processing`. The repository interface can be replaced with PostGIS plus object storage for a multi-user production deployment without changing the selection service layer.
 
 ## Prerequisites
 
@@ -47,7 +48,7 @@ To use another licensed imagery provider, set either:
 
 The map always displays provider attribution. Confirm that the configured provider's terms permit this use.
 
-Backend limits can be changed with `MAX_SELECTION_AREA_HECTARES`, `MIN_SELECTION_AREA_SQUARE_METERS`, and `CORS_ORIGINS`. `SELECTION_DATABASE_PATH` controls the persistent SQLite database location. `GUNW_CATALOG_ENABLED`, `ASF_SEARCH_API_URL`, `GUNW_CATALOG_TIMEOUT_SECONDS`, and `GUNW_PRODUCT_SAMPLE_LIMIT` configure the catalog check. Defaults are documented in the example environment files.
+Backend limits can be changed with `MAX_SELECTION_AREA_HECTARES`, `MIN_SELECTION_AREA_SQUARE_METERS`, and `CORS_ORIGINS`. `SELECTION_DATABASE_PATH` controls the persistent SQLite database location. `GUNW_CATALOG_ENABLED`, `ASF_SEARCH_API_URL`, `GUNW_CATALOG_TIMEOUT_SECONDS`, and `GUNW_PRODUCT_SAMPLE_LIMIT` configure the catalog check. `PROCESSING_OUTPUT_ROOT` controls generated analysis storage. Configure `EARTHDATA_TOKEN` or `EARTHDATA_USER` and `EARTHDATA_PASS` on the backend to download protected inputs; never expose them through browser variables or Git. Defaults are documented in the example environment files.
 
 For deployment, set `APP_ENV=production` and generate a long, random `TECHNICAL_API_KEY`. Production startup fails closed when this key is missing. The key protects saved-record retrieval and catalog-refresh endpoints and must only be used by trusted server-side tools; never put it in a `VITE_` variable or browser code.
 
@@ -95,6 +96,8 @@ backend/.venv/bin/python -m backend.scripts.check_gunw sel_your_selection_id
 
 The saved record at `/api/v1/selections/{selection_id}` is the handoff package for downstream analysis. It contains each `plot_id`, exact Polygon geometry, bounding box, area, farmer/farm context, availability status, match counts, and a sample of product download URLs. When `TECHNICAL_API_KEY` is configured, request it with the `X-Technical-API-Key` header. An Earthdata Login is required to download protected NASA products.
 
+When archived GUNW imagery is found, the farmer interface offers **Prepare satellite results**. The frontend creates a durable processing run and polls its status. The backend passes the saved selection directly into the integrated GUNW screening and SBAS engine. A completed run contains `heatmap_pixels.csv`, GeoTIFF layers, a Zarr displacement cube, validation metrics, and `manifest.json`. These are subsidence-analysis inputs for a later visualization/risk module; they are not themselves a groundwater-risk score.
+
 ## API example
 
 Request:
@@ -139,7 +142,7 @@ Representative response (the ID and timestamp vary):
     "status": "source_available",
     "provider": "NASA Alaska Satellite Facility DAAC",
     "collection": "multiple ASF GUNW collections",
-    "collections_checked": ["ARIA_S1_GUNW", "NISAR_L2_GUNW_BETA_V1", "NISAR_L2_GUNW_V1", "NISAR_UR_L2_GUNW", "SENTINEL1_SLC"],
+    "collections_checked": ["NISAR_L2_GUNW_PROVISIONAL_V1", "ARIA_S1_GUNW", "NISAR_L2_GUNW_BETA_V1", "NISAR_L2_GUNW_V1", "NISAR_UR_L2_GUNW", "SENTINEL1_SLC"],
     "matched_product_count": 0,
     "archived_gunw_product_count": 0,
     "sentinel1_source_scene_count": 214,

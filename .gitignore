@@ -47,4 +47,7 @@ backend/data/*.sqlite3
 backend/data/*.sqlite3-shm
 backend/data/*.sqlite3-wal
 backend/**/__pycache__/
+**/__pycache__/
+backend/data/processing/
+backend/data/verification-inventory/
 .pytest_cache/

@@ -43,6 +43,11 @@ class ASFGUNWCatalog:
 
     GUNW_DATASETS: tuple[tuple[str, str, dict[str, str]], ...] = (
         (
+            "NISAR_L2_GUNW_PROVISIONAL_V1",
+            "NISAR Provisional L2 GUNW",
+            {"shortName": "NISAR_L2_GUNW_PROVISIONAL_V1"},
+        ),
+        (
             "ARIA_S1_GUNW",
             "ARIA Sentinel-1 GUNW",
             {"shortName": "ARIA_S1_GUNW"},

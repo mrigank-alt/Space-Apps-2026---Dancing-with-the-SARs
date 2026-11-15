@@ -82,6 +82,7 @@ def test_available_products_are_normalized_for_downstream_analysis() -> None:
         response(200, "0"),
         response(200, "0"),
         response(200, "0"),
+        response(200, "0"),
     ])
     catalog = ASFGUNWCatalog("https://example.test/search", http_client=fake)
 
@@ -91,6 +92,7 @@ def test_available_products_are_normalized_for_downstream_analysis() -> None:
     assert availability.matched_product_count == 42
     assert availability.archived_gunw_product_count == 42
     assert availability.collections_checked == [
+        "NISAR_L2_GUNW_PROVISIONAL_V1",
         "ARIA_S1_GUNW",
         "NISAR_L2_GUNW_BETA_V1",
         "NISAR_L2_GUNW_V1",
@@ -99,14 +101,14 @@ def test_available_products_are_normalized_for_downstream_analysis() -> None:
     ]
     assert availability.plot_results[0].results_truncated is True
     assert availability.plot_results[0].products[0].product_id == "S1-GUNW-example"
-    assert fake.requests[0]["shortName"] == "ARIA_S1_GUNW"
+    assert fake.requests[0]["shortName"] == "NISAR_L2_GUNW_PROVISIONAL_V1"
     assert fake.requests[0]["intersectsWith"].startswith("POLYGON")
 
 
 def test_no_results_returns_clean_no_data_message() -> None:
     catalog = ASFGUNWCatalog(
         "https://example.test/search",
-        http_client=FakeHTTPClient([response(200, "0") for _ in range(5)]),
+        http_client=FakeHTTPClient([response(200, "0") for _ in range(6)]),
     )
 
     availability = catalog.check([plot()])
@@ -119,7 +121,7 @@ def test_no_results_returns_clean_no_data_message() -> None:
 def test_catalog_failure_is_not_misreported_as_no_coverage() -> None:
     catalog = ASFGUNWCatalog(
         "https://example.test/search",
-        http_client=FakeHTTPClient([response(503, "unavailable") for _ in range(5)]),
+        http_client=FakeHTTPClient([response(503, "unavailable") for _ in range(6)]),
     )
 
     availability = catalog.check([plot()])
@@ -138,6 +140,7 @@ def test_source_scenes_are_distinguished_from_archived_gunw() -> None:
         }],
     }
     fake = FakeHTTPClient([
+        response(200, "0"),
         response(200, "0"),
         response(200, "0"),
         response(200, "0"),

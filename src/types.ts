@@ -133,6 +133,24 @@ export interface SelectionResponse {
   created_at: string;
 }
 
+export interface ProcessingRun {
+  run_id: string;
+  selection_id: string;
+  status: "queued" | "running" | "completed" | "no_data" | "credentials_required" | "failed";
+  message: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  output_directory: string | null;
+  result_summary: {
+    run_id?: string | null;
+    pair_count?: number | null;
+    epoch_count?: number | null;
+    reliable_pixel_fraction?: number | null;
+    median_velocity_los_cm_year?: number | null;
+  } | null;
+}
+
 export interface ApiErrorBody {
   error?: {
     code?: string;

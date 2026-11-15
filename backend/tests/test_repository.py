@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from backend.app.models import AreaMetrics, PointFeature, PointGeometry, SpatialSelection
+from backend.app.models import AreaMetrics, PointFeature, PointGeometry, ProcessingRun, SpatialSelection
 from backend.app.repository import SQLiteSelectionRepository
 
 
@@ -52,3 +52,25 @@ def test_rtree_finds_only_intersecting_selections(tmp_path) -> None:
         "sel_persistence_test"
     ]
     assert repository.intersecting((10, 10, 11, 11)) == []
+
+
+def test_processing_run_survives_repository_recreation(tmp_path) -> None:
+    database_path = str(tmp_path / "spatial.sqlite3")
+    repository = SQLiteSelectionRepository(database_path)
+    repository.save(selection())
+    repository.save_processing_run(
+        ProcessingRun(
+            run_id="run_persistence_test",
+            selection_id="sel_persistence_test",
+            status="queued",
+            message="Waiting to start.",
+            created_at=datetime.now(UTC),
+        )
+    )
+
+    restarted = SQLiteSelectionRepository(database_path)
+    restored = restarted.get_processing_run("run_persistence_test")
+
+    assert restored is not None
+    assert restored.selection_id == "sel_persistence_test"
+    assert restored.status == "queued"
