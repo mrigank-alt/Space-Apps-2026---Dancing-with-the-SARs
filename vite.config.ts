@@ -8,8 +8,8 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     proxy: {
-      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
-      "/health": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/api": { target: process.env.BACKEND_PROXY_URL || "http://127.0.0.1:8000", changeOrigin: true },
+      "/health": { target: process.env.BACKEND_PROXY_URL || "http://127.0.0.1:8000", changeOrigin: true },
     },
     watch:
       process.env.CODEX_SANDBOX === "seatbelt"

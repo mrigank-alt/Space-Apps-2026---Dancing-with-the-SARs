@@ -110,6 +110,8 @@ class DatasetAvailability(BaseModel):
     products: list[GUNWProduct] = Field(default_factory=list)
     results_truncated: bool = False
     message: str
+    elapsed_seconds: float | None = None
+    processable: bool = False
 
 
 class PlotGUNWAvailability(BaseModel):
@@ -152,6 +154,7 @@ class GUNWAvailability(BaseModel):
     plot_results: list[PlotGUNWAvailability] = Field(default_factory=list)
     message: str
     earthdata_login_required_for_download: bool = True
+    elapsed_seconds: float | None = None
 
 
 class ProcessingRun(BaseModel):
@@ -256,6 +259,7 @@ class Assessment(BaseModel):
     recommendations: list[Recommendation] = Field(default_factory=list)
     groundwater: GroundwaterEvidence
     forecast: ForecastResult
+    climate: dict[str, Any] = Field(default_factory=dict)
     limitations: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import csv
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from backend.app.assessment import AssessmentService
+from backend.app.assessment import AssessmentService, _persistence
 from backend.app.groundwater import PublicGroundwaterService
 from backend.app.main import app, repository
 from backend.app.models import (
@@ -18,6 +18,11 @@ from backend.app.models import (
     ProcessingRun,
     SpatialSelection,
 )
+
+
+class NoClimate:
+    def check(self, *_args):
+        return {}
 
 
 class NoGroundwater:
@@ -96,23 +101,52 @@ def test_classifier_creates_clipped_map_zones_and_withholds_red_without_uncertai
         message="test",
         created_at=datetime.now(UTC),
     )
-    assessment = AssessmentService(NoGroundwater()).create(saved, run, write_run(tmp_path))
+    assessment = AssessmentService(NoGroundwater(), NoClimate()).create(saved, run, write_run(tmp_path))
 
     assert assessment.assessment_type == "movement_only"
     assert assessment.forecast.status == "not_available"
     assert assessment.forecast.action_deadline_days is None
-    assert assessment.overall_concern == "yellow"
+    assert assessment.overall_concern == "grey"
+    assert assessment.evidence_quality == "limited"
     assert len(assessment.concern_zones["features"]) == 3
-    assert {item["properties"]["concern_level"] for item in assessment.concern_zones["features"]} == {"green", "yellow"}
+    assert {item["properties"]["concern_level"] for item in assessment.concern_zones["features"]} == {"grey"}
     assert all(item["properties"]["plot_id"] == saved.plots[0].plot_id for item in assessment.concern_zones["features"])
     assert any("red concern is therefore withheld" in item for item in assessment.limitations)
+    assert any("spatial support is limited" in item for item in assessment.limitations)
     raster_path = Path(str(assessment.provenance["classification_raster"]))
     assert raster_path.exists()
     import rasterio
     with rasterio.open(raster_path) as dataset:
         assert dataset.crs.to_string() == "EPSG:4326"
         assert dataset.width == 3
-        assert set(dataset.read(1).ravel()) == {1, 2}
+        assert set(dataset.read(1).ravel()) == {0}
+
+
+def test_persistence_is_date_order_independent_and_rejects_short_series() -> None:
+    dates = [date(2025, 1, 1) + timedelta(days=30 * i) for i in range(8)]
+    row = {f"cumulative_los_cm_{day.isoformat()}": str(index) for index, day in enumerate(dates)}
+    assert _persistence(dict(reversed(list(row.items())))) == 1.0
+    assert _persistence({key: value for key, value in row.items() if "2025-02-" not in key}) == 1.0
+    assert _persistence(dict(list(row.items())[:5])) is None
+
+
+def test_persistence_noise_false_positive_rate_is_bounded() -> None:
+    import random
+
+    dates = [date(2025, 1, 1) + timedelta(days=30 * i) for i in range(8)]
+    keys = [f"cumulative_los_cm_{day.isoformat()}" for day in dates]
+    randomizer = random.Random(7)
+    false_positives = 0
+    trials = 2000
+    for _ in range(trials):
+        value = 0.0
+        row = {}
+        for key in keys:
+            value += randomizer.gauss(0, 1)
+            row[key] = str(value)
+        score = _persistence(row)
+        false_positives += score is not None and score >= 0.90
+    assert false_positives / trials < 0.07
 
 
 def test_groundwater_service_explicitly_reports_unsupported_region() -> None:
@@ -138,7 +172,7 @@ def test_completed_assessment_is_persistent_and_available_through_api(tmp_path: 
         completed_at=datetime.now(UTC),
     )
     repository.save_processing_run(run)
-    assessment = AssessmentService(NoGroundwater()).create(saved, run, write_run(tmp_path))
+    assessment = AssessmentService(NoGroundwater(), NoClimate()).create(saved, run, write_run(tmp_path))
     repository.save_assessment(assessment)
 
     response = TestClient(app).get(f"/api/v1/selections/{saved.selection_id}/assessments/latest")

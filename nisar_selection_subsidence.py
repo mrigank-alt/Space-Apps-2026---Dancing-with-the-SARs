@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sqlite3
 import getpass
 import hashlib
 import json
@@ -44,7 +45,11 @@ import tempfile
 import threading
 import time
 import traceback
+import shutil
+from urllib.parse import urlsplit
+from acquisition_cache import ExtentIndex, append_event, crop_native, enclosing_extent, request_lock
 from collections import Counter, defaultdict
+from contextlib import closing
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -112,6 +117,11 @@ class RunOptions:
     use_cc: bool = True
     engine_export_only: bool = False
     remove_ramp: bool = True
+    extent_step: float = 0.1         # validated enclosing extents; crop before farm preparation
+    download_workers: int = 8
+    submit_workers: int = 4
+    trace_path: Path | None = None
+    prefetch_only: bool = False
 
 
 # ============================== Catalog (ASF) ===============================
@@ -408,14 +418,23 @@ def _read_layers(files, want_cc):
     return {"phase": phase, "coh": coh, "cc": cc, "incidence": incidence, "tf": tf, "crs": crs}
 
 
-def _retry(fn, attempts=3, delay=4.0):
+def _retry(fn, attempts=3, delay=4.0, on_retry=None):
     """Retry transient Harmony/network failures with jittered exponential backoff."""
     for k in range(attempts):
         try:
             return fn()
-        except Exception:
+        except Exception as exc:
             if k == attempts - 1:
                 raise
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            error_name = type(exc).__name__.lower()
+            retryable = (isinstance(exc, (TimeoutError, ConnectionError, OSError))
+                         or any(token in error_name for token in ("timeout", "connection", "temporarily"))
+                         or status == 429 or (status is not None and status >= 500))
+            if not retryable:
+                raise
+            if on_retry:
+                on_retry(k + 1, type(exc).__name__)
             time.sleep(delay * (2 ** k) * (0.5 + random.random()))
 
 
@@ -424,17 +443,67 @@ class Fetcher:
 
     def __init__(self, cache_dir: Path, opts: RunOptions):
         self.cache_dir, self.opts = cache_dir, opts
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._job_db_path = self.cache_dir / "harmony_jobs.sqlite3"
         self._lock = threading.Lock()
         self._local = threading.local()
         self._creds = None
         self._token = None
         self._collection = None
+        self._auth_validated = False
         self._cc_disabled = not opts.use_cc
-        if opts.use_cache:
-            cache_dir.mkdir(parents=True, exist_ok=True)
+        self._extent_index = ExtentIndex(self.cache_dir)
+        self._submit_slots = threading.BoundedSemaphore(max(1, opts.submit_workers))
+        self._download_slots = threading.BoundedSemaphore(max(1, opts.download_workers))
+        self.metrics = {"authentication_seconds": 0.0, "cache_read_seconds": 0.0, "cache_write_seconds": 0.0, "harmony_submit_seconds": 0.0,
+                        "harmony_wait_download_seconds": 0.0, "pair_prepare_seconds": 0.0,
+                        "cache_hits": 0, "cache_misses": 0, "harmony_clips": 0, "prepared_cache_hits": 0}
+        with closing(sqlite3.connect(self._job_db_path, timeout=30)) as con, con:
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("CREATE TABLE IF NOT EXISTS harmony_jobs (request_key TEXT PRIMARY KEY, job_id TEXT NOT NULL, submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+
+    def _event(self, item, stage, **values):
+        # Never record tokens, signed URLs or remote exception strings.
+        append_event(self.opts.trace_path, {"product": item["name"], "stage": stage, **values})
+
+    def _identity(self, item):
+        return repr((COLLECTION, RAW_CACHE_VERSION, item["name"], item["pol"], self.opts.use_cc))
+
+    def _spatial_cached(self, item, bbox):
+        for path in self._extent_index.candidates(self._identity(item), bbox):
+            clip = self._load_cache(path)
+            if clip is not None:
+                cropped = crop_native(clip, bbox)
+                if cropped is not None:
+                    return cropped
+        return None
+
+    def _job_key(self, item, bbox, want_cc):
+        request = (self._collection, item["name"], item["pol"],
+                   tuple(round(float(v), 6) for v in bbox), bool(want_cc), RAW_CACHE_VERSION)
+        return hashlib.sha256(repr(request).encode()).hexdigest()
+
+    def _saved_job(self, request_key):
+        with self._lock, closing(sqlite3.connect(self._job_db_path, timeout=30)) as con, con:
+            row = con.execute("SELECT job_id FROM harmony_jobs WHERE request_key = ?", (request_key,)).fetchone()
+        return row[0] if row else None
+
+    def _save_job(self, request_key, job_id):
+        with self._lock, closing(sqlite3.connect(self._job_db_path, timeout=30)) as con, con:
+            con.execute("INSERT INTO harmony_jobs(request_key, job_id) VALUES (?, ?) "
+                        "ON CONFLICT(request_key) DO UPDATE SET job_id = excluded.job_id, submitted_at = CURRENT_TIMESTAMP",
+                        (request_key, str(job_id)))
+
+    def _clear_job(self, request_key):
+        with self._lock, closing(sqlite3.connect(self._job_db_path, timeout=30)) as con, con:
+            con.execute("DELETE FROM harmony_jobs WHERE request_key = ?", (request_key,))
 
     # -- cache --
     def _path(self, item, bbox):
+        key = f"{self._identity(item)}|{tuple(round(float(v), 6) for v in bbox)}"
+        return self.cache_dir / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.npz"
+
+    def _legacy_path(self, item, bbox):
         key = f"{RAW_CACHE_VERSION}|{item['name']}|{item['pol']}|{tuple(round(v, 6) for v in bbox)}"
         return self.cache_dir / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.npz"
 
@@ -447,7 +516,25 @@ class Fetcher:
         return self.cache_dir / f"prep_{hashlib.sha1(repr(params).encode()).hexdigest()[:20]}.npz"
 
     def is_cached(self, item, spec):
-        return self.opts.use_cache and (self._prep_path(item, spec).exists() or self._path(item, spec["bbox"]).exists())
+        if not self.opts.use_cache:
+            return False
+        # Validate here: a corrupt cache must not suppress authentication.
+        return ((not self.opts.prefetch_only and self.load_prepared(item, spec) is not None)
+                or self._valid_exact(item, spec["bbox"]) is not None
+                or self._spatial_cached(item, spec["bbox"]) is not None)
+
+    def _valid_exact(self, item, bbox):
+        path = self._path(item, bbox)
+        for candidate in (path, self._legacy_path(item, bbox)):
+            if not candidate.exists():
+                continue
+            clip = self._load_cache(candidate)
+            if clip is not None:
+                if candidate != path and self.opts.use_cc and clip.get("cc") is None:
+                    continue  # legacy key did not distinguish requested layers
+                self._extent_index.register(self._identity(item), candidate, bbox)
+                return clip
+        return None
 
     def load_prepared(self, item, spec):
         """Tiny multilooked arrays from a previous run with identical processing parameters (or None)."""
@@ -469,7 +556,9 @@ class Fetcher:
         if not self.opts.use_cache:
             return
         path = self._prep_path(item, spec)
-        tmp = path.with_name(path.stem + ".partial.npz")
+        handle, temporary = tempfile.mkstemp(prefix=path.stem + ".", suffix=".partial.npz", dir=path.parent)
+        os.close(handle)
+        tmp = Path(temporary)
         if "skip" in prep:
             np.savez_compressed(tmp, skip=np.array(prep["skip"]))
         else:
@@ -491,15 +580,25 @@ class Fetcher:
                     if "incidence" in z.files and z["incidence"].size
                     else None
                 )
-                return {"phase": z["phase"], "coh": z["coh"], "cc": cc if self.opts.use_cc else None,
+                clip = {"phase": z["phase"], "coh": z["coh"], "cc": cc if self.opts.use_cc else None,
                         "incidence": incidence,
                         "tf": tuple(float(v) for v in z["tf"]), "crs": str(z["crs"])}
+                shape = clip["phase"].shape
+                if len(shape) != 2 or min(shape) == 0 or clip["coh"].shape != shape:
+                    raise ValueError("Cached phase/coherence grids differ")
+                if len(clip["tf"]) != 6 or not np.isfinite(clip["tf"]).all():
+                    raise ValueError("Invalid cached transform")
+                if any(clip[k] is not None and clip[k].shape != shape for k in ("cc", "incidence")):
+                    raise ValueError("Cached optional layer grids differ")
+                return clip
         except Exception as exc:  # corrupt/partial cache entry -> refetch
             print(f"  cache entry unreadable ({type(exc).__name__}); refetching")
             return None
 
     def _save_cache(self, path, clip):
-        tmp = path.with_name(path.stem + ".partial.npz")
+        handle, temporary = tempfile.mkstemp(prefix=path.stem + ".", suffix=".partial.npz", dir=path.parent)
+        os.close(handle)
+        tmp = Path(temporary)
         cc = clip["cc"] if clip["cc"] is not None else np.zeros(0, np.int32)
         incidence = clip.get("incidence")
         if incidence is None:
@@ -511,6 +610,7 @@ class Fetcher:
 
     # -- auth (called from the main thread before workers start) --
     def authenticate(self):
+        started = time.perf_counter()
         import requests
         from earthdata_auth import get_token
         self._token = get_token()
@@ -522,11 +622,17 @@ class Fetcher:
             else:
                 raise RuntimeError("No Earthdata token found. Run `python earthdata_auth.py --store` once to save a token securely.")
         self._collection = get_collection_id(requests)
+        # Validate once before worker threads start. Each worker still owns its
+        # own HTTP session, but need not repeat the same EDL validation request.
+        self._client()
+        self._auth_validated = True
+        self.metrics["authentication_seconds"] += time.perf_counter() - started
 
     def _client(self):
         if getattr(self._local, "client", None) is None:
             from harmony import Client
-            self._local.client = Client(token=self._token) if self._token else Client(auth=self._creds)
+            kwargs = {"should_validate_auth": not self._auth_validated, "download_timeout": (15, 60)}
+            self._local.client = Client(token=self._token, **kwargs) if self._token else Client(auth=self._creds, **kwargs)
         return self._local.client
 
     def _harmony(self, item, bbox, want_cc):
@@ -539,34 +645,155 @@ class Fetcher:
                           granule_name=[item["name"]], variables=variables,
                           format="image/tiff", max_results=1, skip_preview=True)
         client = self._client()
-        with tempfile.TemporaryDirectory(prefix="nisar_clip_", ignore_cleanup_errors=True) as tmp:
-            job = client.submit(request)
-            files = [Path(f.result()) for f in client.download_all(job, directory=tmp, overwrite=True)]
-            return _read_layers(files, want_cc)
+        request_key = self._job_key(item, bbox, want_cc)
+        job = self._saved_job(request_key)
+        # Keep completed layers across retries and process restarts. The enclosing
+        # request lock in load() prevents two processes writing the same directory.
+        tmp = self.cache_dir / "downloads" / request_key
+        tmp.mkdir(parents=True, exist_ok=True)
+        if job is None:
+            started = time.perf_counter()
+            with self._submit_slots:
+                job = client.submit(request)
+            seconds = time.perf_counter() - started
+            with self._lock:
+                self.metrics["harmony_submit_seconds"] += seconds
+            self._event(item, "submit", seconds=seconds)
+            if isinstance(job, str) and job:
+                self._save_job(request_key, job)
+        else:
+            self._event(item, "resume_remote_job")
+        started = time.perf_counter()
+        try:
+            urls = list(client.result_urls(job, show_progress=False))
+        except Exception as exc:
+            if type(exc).__name__ == "ProcessingFailedException":
+                self._clear_job(request_key)
+                self._event(item, "remote_failed")
+            raise
+        remote_seconds = time.perf_counter() - started
+        self._event(item, "remote_ready", seconds=remote_seconds, file_count=len(urls))
+        if not urls:
+            raise RuntimeError("Harmony completed without raster outputs")
+        files = []
+        transfer_started = time.perf_counter()
+        for url in urls:
+            # URL query strings can contain credentials. Neither names nor logs
+            # retain them; a stable path hash survives refreshed signed URLs.
+            file_key = hashlib.sha256(urlsplit(url).path.encode()).hexdigest()[:24]
+            directory = tmp / file_key
+            directory.mkdir(exist_ok=True)
+            marker = directory / "complete.json"
+            file = None
+            if marker.exists():
+                try:
+                    saved = json.loads(marker.read_text())
+                    candidate = directory / saved["filename"]
+                    if candidate.is_file() and candidate.stat().st_size == saved["bytes"]:
+                        import rasterio
+                        with rasterio.open(candidate) as ds:
+                            ds.read(1)  # detect truncated raster blocks, not just a valid header
+                        file = candidate
+                except Exception:
+                    pass
+            if file is None:
+                download_started = time.perf_counter()
+                def transfer():
+                    with self._download_slots:
+                        return Path(client.download(url, directory=str(directory), overwrite=True).result())
+                file = _retry(transfer, on_retry=lambda attempt, error: self._event(
+                    item, "transfer_retry", attempt=attempt, error_type=error))
+                import rasterio
+                with rasterio.open(file) as ds:
+                    ds.read(1)
+                marker.write_text(json.dumps({"filename": file.name, "bytes": file.stat().st_size}))
+                self._event(item, "download", seconds=time.perf_counter()-download_started,
+                            bytes=file.stat().st_size)
+            else:
+                self._event(item, "reuse_download", bytes=file.stat().st_size)
+            files.append(file)
+        transfer_seconds = time.perf_counter() - transfer_started
+        with self._lock:
+            self.metrics["harmony_wait_download_seconds"] += remote_seconds + transfer_seconds
+            self.metrics["remote_wait_seconds"] = self.metrics.get("remote_wait_seconds", 0) + remote_seconds
+            self.metrics["download_seconds"] = self.metrics.get("download_seconds", 0) + transfer_seconds
+        started = time.perf_counter()
+        clip = _read_layers(files, want_cc)
+        with self._lock:
+            self.metrics["harmony_clips"] += 1
+        self._event(item, "read_layers", seconds=time.perf_counter()-started)
+        clip["_harmony_request_key"] = request_key
+        return clip
 
     def load(self, item, bbox):
+        acquisition_bbox = enclosing_extent(bbox, self.opts.extent_step)
+        if self._collection is not None and tuple(acquisition_bbox) != tuple(bbox):
+            # An upgrade from exact extents must not abandon already submitted
+            # work merely because new requests now use an enclosing extent.
+            if self._saved_job(self._job_key(item, bbox, not self._cc_disabled)):
+                acquisition_bbox = tuple(bbox)
+        key = hashlib.sha256((self._identity(item) + repr(acquisition_bbox)).encode()).hexdigest()
+        with request_lock(self.cache_dir / "locks" / (key + ".lock")):
+            return self._load_locked(item, bbox, acquisition_bbox)
+
+    def _load_locked(self, item, bbox, acquisition_bbox):
         """Return (clip, source) where source is 'cache' or 'harmony'; clip None if offline cache miss."""
         path = self._path(item, bbox)
-        if self.opts.use_cache and path.exists():
-            clip = self._load_cache(path)
+        started = time.perf_counter()
+        if self.opts.use_cache:
+            clip = self._valid_exact(item, bbox)
+            source = "cache"
+            if clip is None:
+                clip = self._spatial_cached(item, bbox)
+                source = "spatial-cache"
             if clip is not None:
-                return clip, "cache"
+                with self._lock:
+                    self.metrics["cache_read_seconds"] += time.perf_counter() - started
+                    self.metrics["cache_hits"] += 1
+                self._event(item, source, seconds=time.perf_counter()-started)
+                return clip, source
+        with self._lock:
+            self.metrics["cache_read_seconds"] += time.perf_counter() - started
+            self.metrics["cache_misses"] += 1
         if self.opts.offline:
             return None, "offline"
         want_cc = not self._cc_disabled
         try:
-            clip = _retry(lambda: self._harmony(item, bbox, want_cc), attempts=2 if want_cc else 3)
+            clip = _retry(lambda: self._harmony(item, acquisition_bbox, not self._cc_disabled), attempts=2 if want_cc else 3,
+                          on_retry=lambda attempt, error: self._event(item, "acquisition_retry", attempt=attempt, error_type=error))
         except Exception as exc:
-            if not want_cc:
+            cc_error = "connectedcomponents" in str(exc).lower() or "connected components" in str(exc).lower()
+            if not want_cc or not cc_error:
                 raise
             with self._lock:
                 if not self._cc_disabled:
                     self._cc_disabled = True
                     print(f"  connectedComponents request failed twice ({type(exc).__name__}: {exc}); "
                           "continuing without it for all remaining pairs")
-            clip = _retry(lambda: self._harmony(item, bbox, False))
+            self._event(item, "connected_component_fallback")
+            clip = _retry(lambda: self._harmony(item, acquisition_bbox, False), attempts=2)
         if self.opts.use_cache:
+            started = time.perf_counter()
+            path = self._path(item, acquisition_bbox)
             self._save_cache(path, clip)
+            self._extent_index.register(self._identity(item), path, acquisition_bbox)
+            self._event(item, "cache_write", seconds=time.perf_counter()-started, bytes=path.stat().st_size)
+            with self._lock:
+                self.metrics["cache_write_seconds"] = self.metrics.get("cache_write_seconds", 0.0) + time.perf_counter() - started
+        request_key = clip.pop("_harmony_request_key", None)
+        if request_key is not None:
+            self._clear_job(request_key)
+            shutil.rmtree(self.cache_dir / "downloads" / request_key, ignore_errors=True)
+        if tuple(acquisition_bbox) != tuple(bbox):
+            cropped = crop_native(clip, bbox)
+            if cropped is None:
+                # An edge granule may not cover the expanded rectangle. Preserve
+                # the exact-request path instead of analysing a different extent.
+                self._event(item, "extent_crop_fallback")
+                exact_key = hashlib.sha256((self._identity(item) + repr(tuple(bbox))).encode()).hexdigest()
+                with request_lock(self.cache_dir / "locks" / (exact_key + ".lock")):
+                    return self._load_locked(item, bbox, bbox)
+            clip = cropped
         return clip, "harmony"
 
 
@@ -611,6 +838,9 @@ def _prepare_pair(clip, spec):
 def _acquire(city, idx, total, item, spec, fetcher):
     tag = f"[{city}] pair {idx}/{total} {item['start'].date()} -> {item['end'].date()}"
     try:
+        if fetcher.opts.prefetch_only:
+            clip, source = fetcher.load(item, spec["bbox"])
+            return {"status": "ok" if clip is not None else "offline-miss", "source": source}
         prep = fetcher.load_prepared(item, spec)
         source = "prep-cache"
         if prep is None:
@@ -618,9 +848,18 @@ def _acquire(city, idx, total, item, spec, fetcher):
             if clip is None:
                 print(f"{tag}: not cached (offline)")
                 return {"status": "skipped: not in cache (offline mode)"}
+            prepare_started = time.perf_counter()
             prep = _prepare_pair(clip, spec)
+            with fetcher._lock:
+                fetcher.metrics["pair_prepare_seconds"] += time.perf_counter() - prepare_started
+            fetcher._event(item, "prepare", seconds=time.perf_counter()-prepare_started)
             fetcher.save_prepared(item, spec, prep)
+        else:
+            with fetcher._lock:
+                fetcher.metrics["prepared_cache_hits"] += 1
+            fetcher._event(item, "prepared-cache")
     except Exception as exc:
+        fetcher._event(item, "failed", error_type=type(exc).__name__)
         print(f"{tag}: FAILED {type(exc).__name__}: {exc}")
         return {"status": f"failed: {type(exc).__name__}: {exc}"}
     if "skip" in prep:
@@ -632,7 +871,8 @@ def _acquire(city, idx, total, item, spec, fetcher):
 
 
 # ============================ Stack processing ==============================
-def _detrend_stack(PH, COH, rml, exclude, sign, *, reference_only=False, remove_ramp=True):
+def _detrend_stack(PH, COH, rml, exclude, sign, *, reference_only=False, remove_ramp=True,
+                   return_diagnostics=False):
     """Reference phase and convert radians to relative LOS cm.
 
     The engine fits ramps only on the exterior reference area, never on the
@@ -642,6 +882,7 @@ def _detrend_stack(PH, COH, rml, exclude, sign, *, reference_only=False, remove_
     """
     scale = sign * WAVELENGTH_M * 100.0 / (4 * np.pi)
     Y = np.full(PH.shape, np.nan, np.float32)
+    diagnostics = []
     for i in range(PH.shape[0]):
         ph = PH[i].astype(np.float64)
         usable = np.isfinite(ph) & (COH[i] >= COHERENCE_MIN)
@@ -652,13 +893,20 @@ def _detrend_stack(PH, COH, rml, exclude, sign, *, reference_only=False, remove_
             if ramp is None and not reference_only:
                 ramp = _robust_surface(ph, usable)
             if ramp is None:
+                diagnostics.append({"status": "insufficient_reference_for_ramp"})
                 continue
         clean = ph - ramp
         ref = clean[rml & usable & np.isfinite(clean)]
         if ref.size < MIN_REFERENCE_PIXELS:
+            diagnostics.append({"status": "insufficient_reference_pixels", "pixel_count": int(ref.size)})
             continue
+        ref_centered = ref - np.median(ref)
+        ref_mad_cm = float(1.4826 * np.median(np.abs(ref_centered - np.median(ref_centered))) * abs(scale))
+        ref_p95_abs_cm = float(np.percentile(np.abs(ref_centered * scale), 95))
+        diagnostics.append({"status": "measured", "pixel_count": int(ref.size),
+                            "residual_mad_cm": ref_mad_cm, "residual_p95_abs_cm": ref_p95_abs_cm})
         Y[i] = (clean - np.median(ref)) * scale
-    return Y
+    return (Y, diagnostics) if return_diagnostics else Y
 
 
 def _fit_rates(Y, C, dt, iterations=4):
@@ -856,8 +1104,9 @@ def _process_city(city, spec, items, acquired, opts, out_root):
     # The bridge only needs the screened displacement stack, not the older
     # hotspot/rate products. Skip those legacy iterative fits on bridge runs.
     if opts.engine_export_only:
-        Y = _detrend_stack(PH, COH, rml, np.zeros(shape, bool), opts.phase_sign,
-                           reference_only=True, remove_ramp=opts.remove_ramp)
+        Y, reference_diagnostics = _detrend_stack(
+            PH, COH, rml, np.zeros(shape, bool), opts.phase_sign,
+            reference_only=True, remove_ramp=opts.remove_ramp, return_diagnostics=True)
         epoch_dates = sorted({d for pair in dates for d in pair})
         epoch_index = {d: i for i, d in enumerate(epoch_dates)}
         epoch_days = np.array([(d - epoch_dates[0]).total_seconds() / 86400 for d in epoch_dates], dtype=np.float64)
@@ -872,6 +1121,7 @@ def _process_city(city, spec, items, acquired, opts, out_root):
                             weights=engine_weights, pair_coherence=COH.astype(np.float32),
                             incidence_angle_deg=INC.astype(np.float32), transform=np.asarray(tf, dtype=np.float64),
                             crs_wkt=np.asarray(crs), epoch_dates=np.asarray([d.isoformat() for d in epoch_dates]),
+                            reference_diagnostics_json=np.asarray(json.dumps(reference_diagnostics)),
                             phase_processing=np.asarray("reference_only_ramp" if opts.remove_ramp else "reference_only_offset"),
                             phase_sign=np.asarray(opts.phase_sign))
         return []
@@ -1153,7 +1403,12 @@ def main():
     parser.add_argument("--no-remove-ramp", action="store_true",
                         help="engine export: reference offset only, preserving spatial trends")
     parser.add_argument("--serial", action="store_true", help="process cities one after another instead of in parallel processes")
-    parser.add_argument("--workers", type=int, default=0, help="concurrent Harmony requests (default: all of them, max %d)" % MAX_WORKERS)
+    parser.add_argument("--workers", type=int, default=int(os.getenv("GUNW_WORKERS", "0")), help="concurrent Harmony requests (default: all of them, max %d)" % MAX_WORKERS)
+    parser.add_argument("--download-workers", type=int, default=int(os.getenv("GUNW_DOWNLOAD_WORKERS", "8")), help="maximum simultaneous file transfers in this process")
+    parser.add_argument("--submit-workers", type=int, default=int(os.getenv("GUNW_SUBMIT_WORKERS", "4")), help="maximum simultaneous submissions in this process")
+    parser.add_argument("--extent-step", type=float, default=float(os.getenv("GUNW_EXTENT_STEP", "0.1")),
+                        help="outward acquisition grid in degrees; 0 keeps exact extents")
+    parser.add_argument("--prefetch-only", action="store_true", help="populate reusable raw imagery; do not produce an assessment")
     parser.add_argument("--phase-sign", type=float, choices=(1.0, -1.0), default=PHASE_SIGN, help="multiply phase by this sign")
     parser.add_argument("--cities", nargs="+", type=str.capitalize, choices=list(AOIS), help="subset of cities")
     parser.add_argument("--output", type=Path, default=OUT_DIR)
@@ -1211,13 +1466,19 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     opts = RunOptions(workers=max(0, args.workers), plots=not args.no_plots, phase_sign=args.phase_sign,
                       use_cache=not args.no_cache, offline=args.offline, use_cc=not args.no_connected_components,
-                      engine_export_only=args.engine_export_only, remove_ramp=not args.no_remove_ramp)
+                      engine_export_only=args.engine_export_only, remove_ramp=not args.no_remove_ramp,
+                      extent_step=args.extent_step, download_workers=args.download_workers,
+                      submit_workers=args.submit_workers, trace_path=out / "acquisition_events.jsonl",
+                      prefetch_only=args.prefetch_only)
+    if not 0 <= opts.extent_step <= 1 or min(opts.download_workers, opts.submit_workers) < 1:
+        parser.error("extent-step must be in [0,1]; worker limits must be positive")
     if args.no_remove_ramp and not args.engine_export_only:
         parser.error("--no-remove-ramp requires --engine-export-only")
     has_selection = bool(args.geojson or args.selection_id)
     aois = {c: AOIS[c] for c in (args.cities or ([args.label] if has_selection else AOIS))}
 
     import asf_search as asf
+    search_started = time.perf_counter()
     try:
         inventory = {city: choose_track(city, search_city(asf, city, spec)) for city, spec in aois.items()}
     except Exception as exc:
@@ -1229,6 +1490,7 @@ def main():
                 "This occurs before Earthdata token authentication."
             ) from None
         raise
+    catalog_search_seconds = time.perf_counter() - search_started
     inv_rows = [{**{k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in item.items() if k != "product"}, "city": city}
                 for city, items in inventory.items() for item in items]
     _write_csv(out / "asf_inventory.csv", inv_rows)
@@ -1250,7 +1512,8 @@ def main():
             print(f"Original ASF browse image saved to {browse_path}; no analysis or raster rendering was performed.")
             return
         fetcher = Fetcher(args.cache_dir or out / "clip_cache", opts)
-        raw_clip_cached = opts.use_cache and fetcher._path(item, aois[city]["bbox"]).exists()
+        raw_clip_cached = opts.use_cache and (fetcher._valid_exact(item, aois[city]["bbox"]) is not None
+                                            or fetcher._spatial_cached(item, aois[city]["bbox"]) is not None)
         if not raw_clip_cached and not opts.offline:
             from earthdata_auth import get_token
             token = get_token()
@@ -1268,21 +1531,23 @@ def main():
         return
 
     fetcher = Fetcher(args.cache_dir or out / "clip_cache", opts)
+    cache_probe_started = time.perf_counter()
     missing = [(c, it) for c, items in inventory.items() for it in items if not fetcher.is_cached(it, aois[c])]
+    cache_probe_seconds = time.perf_counter() - cache_probe_started
     total = sum(len(v) for v in inventory.values())
+    workers = opts.workers or min(MAX_WORKERS, max(4, len(missing)))
     if missing and not opts.offline:
         print(f"{len(missing)} of {total} clip(s) not cached; authenticating for Harmony "
-              f"(all {len(missing)} requests will run concurrently - expect roughly one Harmony job latency).")
+              f"(up to {min(workers, len(missing))} product requests in flight).")
         fetcher.authenticate()
     elif missing:
         print(f"Offline mode: {len(missing)} uncached clip(s) will be skipped.")
     else:
         print(f"All {total} clips cached; no login or Harmony requests needed.")
-    workers = opts.workers or min(MAX_WORKERS, max(4, len(missing)))
-
     cities = [c for c in inventory if inventory[c]]
     if not cities:
         return
+    acquire_process_started = time.perf_counter()
     all_pairs, failed = [], []
     io_pool = ThreadPoolExecutor(max_workers=workers)
     n_proc = 1 if args.serial else max(1, min(len(cities), os.cpu_count() or 1))
@@ -1301,6 +1566,11 @@ def main():
             if remaining[city]:
                 continue
             acquired = [f.result() for f in pair_futs[city]]
+            if args.prefetch_only:
+                all_pairs.extend({"city": city, **result} for result in acquired)
+                if any(result["status"] != "ok" for result in acquired):
+                    failed.append(city)
+                continue
             args_ = (city, aois[city], _strip(inventory[city]), acquired, opts, out)
             if proc_pool:
                 city_jobs[proc_pool.submit(_process_city, *args_)] = city
@@ -1330,7 +1600,18 @@ def main():
         "collection": COLLECTION, "period_start": START.isoformat(), "period_end_exclusive": END_EXCLUSIVE.isoformat(),
         "catalog_coverage_found": [first.isoformat() if first else None, last.isoformat() if last else None],
         "cities_processed": [c for c in cities if c not in failed], "cities_failed": failed,
-        "runtime_seconds": round(elapsed, 1), "clips_fetched_from_harmony": len(missing) if not opts.offline else 0,
+        "runtime_seconds": round(elapsed, 1), "clips_fetched_from_harmony": fetcher.metrics["harmony_clips"],
+        "acquisition_config": {"workers": workers, "submit_workers": opts.submit_workers,
+                               "download_workers": opts.download_workers, "extent_step": opts.extent_step,
+                               "prefetch_only": opts.prefetch_only},
+        "timing_semantics": "stage_seconds remote/transfer counters sum concurrent tasks; runtime_seconds is wall time",
+        "stage_seconds": {"catalog_search": round(catalog_search_seconds, 3),
+                          "cache_probe": round(cache_probe_seconds, 3),
+                          "acquisition_and_pair_preparation": round(time.perf_counter() - acquire_process_started, 3),
+                          **{k: round(v, 3) for k, v in fetcher.metrics.items() if k.endswith("seconds")}},
+        "cache": {"hits": fetcher.metrics["cache_hits"] + fetcher.metrics["prepared_cache_hits"],
+                  "misses": fetcher.metrics["cache_misses"], "initial_missing": len(missing),
+                  "directory": str(fetcher.cache_dir)},
         "raster_access": ("Harmony spatial subset; phase, coherence and (if available) connectedComponents COGs; "
                           "temporary files deleted; small clipped arrays cached in clip_cache") if opts.use_cache else
                          "Harmony spatial subset; temporary files deleted; no cache",

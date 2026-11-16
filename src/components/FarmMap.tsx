@@ -64,11 +64,14 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
   const mapRef = useRef<MapLibreMap | undefined>(undefined);
   const drawRef = useRef<TerraDraw | undefined>(undefined);
   const locationMarkerRef = useRef<Marker | undefined>(undefined);
-  const callbackRef = useRef({ onBoundaryChange, onToolChange, onUndoAvailability });
+  const drawSyncFrame = useRef<number | null>(null);
+  const zoneDetailsRef = useRef(new Map<string, ConcernZoneProperties>());
+  const callbackRef = useRef({ onBoundaryChange, onToolChange, onUndoAvailability, onZoneSelect, activeTool });
   const [ready, setReady] = useState(false);
   const [basemapMode, setBasemapMode] = useState<"satellite" | "map">("satellite");
+  const [resultMode, setResultMode] = useState<"concern" | "movement">("concern");
 
-  callbackRef.current = { onBoundaryChange, onToolChange, onUndoAvailability };
+  callbackRef.current = { onBoundaryChange, onToolChange, onUndoAvailability, onZoneSelect, activeTool };
 
   function syncBoundary(draw = drawRef.current) {
     if (!draw) return;
@@ -204,13 +207,22 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
           callbackRef.current.onToolChange("edit");
         }
       });
-      draw.on("change", () => syncBoundary(draw));
+      draw.on("change", () => {
+        if (drawSyncFrame.current !== null) return;
+        drawSyncFrame.current = requestAnimationFrame(() => {
+          drawSyncFrame.current = null;
+          syncBoundary(draw);
+        });
+      });
       draw.on("history", () => callbackRef.current.onUndoAvailability(draw.canUndo()));
       drawRef.current = draw;
       setReady(true);
     });
 
     return () => {
+      if (drawSyncFrame.current !== null) cancelAnimationFrame(drawSyncFrame.current);
+      drawSyncFrame.current = null;
+      setReady(false);
       locationMarkerRef.current?.remove();
       if (drawRef.current?.enabled) drawRef.current.stop();
       drawRef.current = undefined;
@@ -265,14 +277,27 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
     const sourceId = "concern-zones";
     const fillId = "concern-zones-fill";
     const lineId = "concern-zones-line";
+    const movementId = "concern-zones-movement";
     if (!assessment) {
+      zoneDetailsRef.current.clear();
       if (map.getLayer(lineId)) map.removeLayer(lineId);
+      if (map.getLayer(movementId)) map.removeLayer(movementId);
       if (map.getLayer(fillId)) map.removeLayer(fillId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       return;
     }
+    zoneDetailsRef.current = new Map(assessment.concern_zones.features.map((feature) => [feature.properties.zone_id, feature.properties]));
+    const mapData = {
+      type: "FeatureCollection" as const,
+      features: assessment.concern_zones.features.map((feature) => ({
+        type: "Feature" as const,
+        id: feature.id,
+        geometry: feature.geometry,
+        properties: { zone_id: feature.properties.zone_id, plot_id: feature.properties.plot_id, concern_level: feature.properties.concern_level, los_velocity_cm_year: feature.properties.los_velocity_cm_year },
+      })),
+    };
     if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, { type: "geojson", data: assessment.concern_zones });
+      map.addSource(sourceId, { type: "geojson", data: mapData, tolerance: 0.375, buffer: 32, maxzoom: 17 });
       map.addLayer({
         id: fillId,
         type: "fill",
@@ -288,29 +313,60 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
         source: sourceId,
         paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.9 },
       });
+      map.addLayer({
+        id: movementId,
+        type: "fill",
+        source: sourceId,
+        layout: { visibility: "none" },
+        paint: { "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", "los_velocity_cm_year"], 0], -5, "#315a9b", 0, "#f2efdf", 5, "#b83232"], "fill-opacity": 0.72 },
+      });
     } else {
-      (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData(assessment.concern_zones);
+      const mark = `concern-zones-${Date.now()}`;
+      performance.mark(`${mark}-start`);
+      (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData(mapData);
+      map.once("idle", () => {
+        performance.mark(`${mark}-end`);
+        performance.measure("concern-zones-update", `${mark}-start`, `${mark}-end`);
+        performance.clearMarks(`${mark}-start`);
+        performance.clearMarks(`${mark}-end`);
+      });
     }
-    const filter: maplibregl.FilterSpecification | null = selectedPlotId
-      ? ["==", ["get", "plot_id"], selectedPlotId]
-      : null;
-    map.setFilter(fillId, filter);
-    map.setFilter(lineId, filter);
     const click = (event: maplibregl.MapLayerMouseEvent) => {
-      const properties = event.features?.[0]?.properties as ConcernZoneProperties | undefined;
-      if (properties) onZoneSelect?.(properties);
+      const mapProperties = event.features?.[0]?.properties as { zone_id?: string } | undefined;
+      if (["polygon", "freehand"].includes(callbackRef.current.activeTool)) return;
+      const properties = mapProperties?.zone_id ? zoneDetailsRef.current.get(mapProperties.zone_id) : undefined;
+      if (properties) callbackRef.current.onZoneSelect?.(properties);
     };
     const enter = () => { map.getCanvas().style.cursor = "pointer"; };
     const leave = () => { map.getCanvas().style.cursor = ""; };
     map.on("click", fillId, click);
+    map.on("click", movementId, click);
     map.on("mouseenter", fillId, enter);
     map.on("mouseleave", fillId, leave);
     return () => {
       map.off("click", fillId, click);
+      map.off("click", movementId, click);
       map.off("mouseenter", fillId, enter);
       map.off("mouseleave", fillId, leave);
     };
-  }, [assessment, onZoneSelect, ready, selectedPlotId]);
+  }, [assessment, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const filter: maplibregl.FilterSpecification | null = selectedPlotId ? ["==", ["get", "plot_id"], selectedPlotId] : null;
+    if (map.getLayer("concern-zones-fill")) map.setFilter("concern-zones-fill", filter);
+    if (map.getLayer("concern-zones-line")) map.setFilter("concern-zones-line", filter);
+    if (map.getLayer("concern-zones-movement")) map.setFilter("concern-zones-movement", filter);
+  }, [ready, selectedPlotId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (map.getLayer("concern-zones-fill")) map.setLayoutProperty("concern-zones-fill", "visibility", resultMode === "concern" ? "visible" : "none");
+    if (map.getLayer("concern-zones-line")) map.setLayoutProperty("concern-zones-line", "visibility", resultMode === "concern" ? "visible" : "none");
+    if (map.getLayer("concern-zones-movement")) map.setLayoutProperty("concern-zones-movement", "visibility", resultMode === "movement" ? "visible" : "none");
+  }, [ready, resultMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -378,6 +434,12 @@ export const FarmMap = forwardRef<FarmMapHandle, FarmMapProps>(function FarmMap(
     <div className={`map-stage ${activeTool === "polygon" || activeTool === "freehand" ? "is-drawing" : ""}`}>
       <div ref={containerRef} className="map" aria-label="Interactive farm boundary map" />
       {!ready && <div className="map-loading"><span /> Loading map…</div>}
+      {assessment && (
+        <div className="basemap-switcher" role="group" aria-label="Analysis layer">
+          <button type="button" className={resultMode === "concern" ? "active" : ""} aria-pressed={resultMode === "concern"} onClick={() => setResultMode("concern")}>Movement review</button>
+          <button type="button" className={resultMode === "movement" ? "active" : ""} aria-pressed={resultMode === "movement"} onClick={() => setResultMode("movement")}>LOS movement</button>
+        </div>
+      )}
       {configuration.basemapToggle && (
         <div className="basemap-switcher" role="group" aria-label="Map appearance">
           <button

@@ -50,4 +50,5 @@ backend/**/__pycache__/
 **/__pycache__/
 backend/data/processing/
 backend/data/verification-inventory/
+backend/data/acquisition_experiments/
 .pytest_cache/

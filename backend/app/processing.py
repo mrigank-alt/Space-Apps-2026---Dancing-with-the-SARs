@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from uuid import uuid4
 
 from subsidence_engine import PipelineConfig, run_pipeline
@@ -19,8 +22,20 @@ class GUNWProcessingService:
         self._repository = repository
         self._output_root = Path(output_root)
         self._assessments = AssessmentService()
+        self._executor_lock = Lock()
+        self._queue_lock = Lock()
+        self._executor: ThreadPoolExecutor | None = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="gunw-processing")
 
     def queue(self, selection_id: str) -> ProcessingRun | None:
+        # Keep repeated clicks/retries from adding another expensive acquisition.
+        with self._queue_lock:
+            for existing in self._repository.list_processing_runs(selection_id):
+                if existing.status in {"queued", "running"}:
+                    return self.get(existing.run_id)
+            return self._queue_new(selection_id)
+
+    def _queue_new(self, selection_id: str) -> ProcessingRun | None:
         selection = self._repository.get(selection_id)
         if selection is None:
             return None
@@ -34,11 +49,45 @@ class GUNWProcessingService:
             progress_percent=5,
             stage="Waiting",
         )
-        return self._repository.save_processing_run(run)
+        saved = self._repository.save_processing_run(run)
+        self.submit(saved.run_id)
+        return saved
+
+    def start(self) -> None:
+        """Recover queued or interrupted work after the API process starts."""
+        with self._executor_lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gunw-processing")
+        self._repository.recover_interrupted_processing_runs()
+        for run in self._repository.list_queued_processing_runs():
+            self.submit(run.run_id)
+
+    def submit(self, run_id: str) -> None:
+        with self._executor_lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gunw-processing")
+            self._executor.submit(self.execute, run_id)
+
+    def close(self) -> None:
+        with self._executor_lock:
+            executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=False)
 
     def execute(self, run_id: str) -> None:
         run = self._repository.get_processing_run(run_id)
-        if run is None:
+        if run is None or run.status != "queued":
+            return
+        started = run.model_copy(
+            update={
+                "status": "running",
+                "message": "Satellite imagery is being prepared for your plots.",
+                "started_at": datetime.now(UTC),
+                "progress_percent": 20,
+                "stage": "Preparing satellite imagery",
+            }
+        )
+        if not self._repository.claim_processing_run(started):
             return
         selection = self._repository.get(run.selection_id)
         if selection is None:
@@ -60,22 +109,13 @@ class GUNWProcessingService:
             )
             return
 
-        started = run.model_copy(
-            update={
-                "status": "running",
-                "message": "Satellite imagery is being prepared for your plots.",
-                "started_at": datetime.now(UTC),
-                "progress_percent": 20,
-                "stage": "Preparing satellite imagery",
-            }
-        )
-        self._repository.save_processing_run(started)
         try:
             manifest = run_pipeline(
                 PipelineConfig(
                     aoi_id=selection.selection_id,
                     selection_id=selection.selection_id,
                     output_root=self._output_root,
+                    csv_only=True,
                 )
             )
             interpreting = started.model_copy(update={
@@ -84,7 +124,9 @@ class GUNWProcessingService:
                 "stage": "Building your concern map",
             })
             self._repository.save_processing_run(interpreting)
+            assessment_started = time.perf_counter()
             assessment = self._assessments.create(selection, interpreting, manifest)
+            assessment_seconds = time.perf_counter() - assessment_started
             self._repository.save_assessment(assessment)
             summary = {
                 "run_id": manifest.get("run_id"),
@@ -101,6 +143,11 @@ class GUNWProcessingService:
                 ),
                 "measurement_interval": manifest.get("measurement_interval"),
                 "phase_processing": (manifest.get("processing") or {}).get("phase_processing"),
+                "assessment_seconds": assessment_seconds,
+                "assessment_feature_count": len(assessment.concern_zones.get("features", [])),
+                "assessment_payload_bytes": len(assessment.model_dump_json().encode("utf-8")),
+                "pipeline_timings": manifest.get("speed"),
+                "signal_quality_diagnostics": manifest.get("signal_quality_diagnostics"),
             }
             completed = interpreting.model_copy(
                 update={
@@ -142,7 +189,18 @@ class GUNWProcessingService:
             self._repository.save_processing_run(failed)
 
     def get(self, run_id: str) -> ProcessingRun | None:
-        return self._repository.get_processing_run(run_id)
+        run = self._repository.get_processing_run(run_id)
+        if run is not None and run.status == "queued":
+            queued = self._repository.list_queued_processing_runs()
+            position = next((index + 1 for index, item in enumerate(queued) if item.run_id == run_id), None)
+            if position is not None:
+                return run.model_copy(update={
+                    "stage": f"Waiting · queue position {position}",
+                    "message": ("Another analysis is using the processing worker. "
+                                f"Your job is position {position} in the waiting queue; "
+                                "it has not started downloading imagery yet."),
+                })
+        return run
 
     def _finish(self, run: ProcessingRun, status: str, message: str) -> None:
         self._repository.save_processing_run(

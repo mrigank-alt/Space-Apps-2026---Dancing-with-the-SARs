@@ -218,6 +218,12 @@ export interface Assessment {
     summary: string;
     limitations: string[];
   };
+  climate?: {
+    status: string; summary: string; source_url: string;
+    location: { type: "Point"; coordinates: [number, number] };
+    monthly: Array<{month: string; mean_temperature_c: number | null; precipitation_mm: number | null; partial_calendar_month: boolean}>;
+    comparison_status: string;
+  };
   forecast: {
     status: "available" | "not_available";
     title: string;

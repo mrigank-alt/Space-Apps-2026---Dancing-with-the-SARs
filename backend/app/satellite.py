@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+import hashlib
+import threading
+import time
 from typing import Any, Protocol
 
 import httpx
@@ -47,30 +50,10 @@ class ASFGUNWCatalog:
             "NISAR Provisional L2 GUNW",
             {"shortName": "NISAR_L2_GUNW_PROVISIONAL_V1"},
         ),
-        (
-            "ARIA_S1_GUNW",
-            "ARIA Sentinel-1 GUNW",
-            {"shortName": "ARIA_S1_GUNW"},
-        ),
-        (
-            "NISAR_L2_GUNW_BETA_V1",
-            "NISAR Beta L2 GUNW",
-            {"shortName": "NISAR_L2_GUNW_BETA_V1"},
-        ),
-        (
-            "NISAR_L2_GUNW_V1",
-            "NISAR Validated L2 GUNW",
-            {"shortName": "NISAR_L2_GUNW_V1"},
-        ),
-        (
-            "NISAR_UR_L2_GUNW",
-            "NISAR Urgent Response L2 GUNW",
-            {
-                "shortName": "NISAR_UR_L2",
-                "granule_list": "NISAR_L2_UR_GUNW*",
-                "maxResults": "250",
-            },
-        ),
+        ("ARIA_S1_GUNW", "ARIA Sentinel-1 GUNW", {"shortName": "ARIA_S1_GUNW"}),
+        ("NISAR_L2_GUNW_BETA_V1", "NISAR Beta L2 GUNW", {"shortName": "NISAR_L2_GUNW_BETA_V1"}),
+        ("NISAR_L2_GUNW_V1", "NISAR Validated L2 GUNW", {"shortName": "NISAR_L2_GUNW_V1"}),
+        ("NISAR_UR_L2_GUNW", "NISAR Urgent Response L2 GUNW", {"shortName": "NISAR_L2_UR", "granule_list": "NISAR_L2_UR_GUNW*", "maxResults": "250"}),
     )
     SOURCE_DATASETS: tuple[tuple[str, str, dict[str, str]], ...] = (
         (
@@ -90,13 +73,23 @@ class ASFGUNWCatalog:
         self._endpoint = endpoint
         self._timeout = timeout_seconds
         self._sample_limit = product_sample_limit
+        self._provided_http_client = http_client is not None
         self._http = http_client or httpx.Client(
             timeout=timeout_seconds,
             headers={"User-Agent": "Groundsignal/1.0 GUNW availability checker"},
         )
+        self._cache_lock = threading.Lock()
+        self._cache: dict[str, tuple[float, GUNWAvailability]] = {}
+        self._cache_ttl_seconds = 900
 
     def check(self, plots: list[PlotRecord]) -> GUNWAvailability:
+        started = time.perf_counter()
         checked_at = datetime.now(UTC)
+        cache_key = hashlib.sha256("|".join(plot.geometry.model_dump_json() if hasattr(plot.geometry, "model_dump_json") else str(plot.geometry) for plot in plots).encode()).hexdigest()
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+            if cached and time.monotonic() - cached[0] < self._cache_ttl_seconds:
+                return cached[1].model_copy(deep=True, update={"checked_at": checked_at, "elapsed_seconds": time.perf_counter() - started})
         workers = min(4, max(1, len(plots)))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             results = list(executor.map(self._check_plot, plots))
@@ -122,7 +115,7 @@ class ASFGUNWCatalog:
             status = "not_available"
             message = NO_DATA_MESSAGE
 
-        return GUNWAvailability(
+        result = GUNWAvailability(
             status=status,
             checked_at=checked_at,
             matched_product_count=total_products,
@@ -135,23 +128,29 @@ class ASFGUNWCatalog:
             ],
             plot_results=results,
             message=message,
+            elapsed_seconds=time.perf_counter() - started,
         )
+        if status not in {"check_failed", "checking"}:
+            with self._cache_lock:
+                self._cache[cache_key] = (time.monotonic(), result.model_copy(deep=True))
+        return result
 
     def _check_plot(self, plot: PlotRecord) -> PlotGUNWAvailability:
         try:
             geometry = shape(plot.geometry).simplify(0.00005, preserve_topology=True)
-            datasets = [
-                self._check_dataset(geometry.wkt, dataset_id, label, "gunw", params)
-                for dataset_id, label, params in self.GUNW_DATASETS
-            ]
-            datasets.extend(
-                self._check_dataset(geometry.wkt, dataset_id, label, "source", params)
-                for dataset_id, label, params in self.SOURCE_DATASETS
-            )
+            checks = [(*item, "gunw", item[0] == "NISAR_L2_GUNW_PROVISIONAL_V1") for item in self.GUNW_DATASETS] + [(*item, "source", False) for item in self.SOURCE_DATASETS]
+            if self._provided_http_client:
+                datasets = [self._check_dataset(geometry.wkt, dataset_id, label, category, params, processable)
+                            for dataset_id, label, params, category, processable in checks]
+            else:
+                with ThreadPoolExecutor(max_workers=min(4, len(checks))) as executor:
+                    futures = [executor.submit(self._check_dataset, geometry.wkt, dataset_id, label, category, params, processable)
+                               for dataset_id, label, params, category, processable in checks]
+                    datasets = [future.result() for future in futures]
             gunw_count = sum(
                 result.matched_product_count
                 for result in datasets
-                if result.category == "gunw"
+                if result.category == "gunw" and result.processable
             )
             source_count = sum(
                 result.matched_product_count
@@ -162,8 +161,10 @@ class ASFGUNWCatalog:
                 product
                 for result in datasets
                 if result.category == "gunw"
+                and result.processable
                 for product in result.products
             ]
+            unsupported_count = sum(result.matched_product_count for result in datasets if result.category == "gunw" and not result.processable)
             failed = any(result.status == "check_failed" for result in datasets)
 
             if gunw_count:
@@ -177,7 +178,8 @@ class ASFGUNWCatalog:
                 message = CHECK_FAILED_MESSAGE
             else:
                 status = "not_available"
-                message = NO_DATA_MESSAGE
+                message = (f"{unsupported_count:,} archived GUNW products were found, but this processor currently supports NISAR Provisional only. "
+                           "No processable imagery was found for this plot.") if unsupported_count else NO_DATA_MESSAGE
 
             return PlotGUNWAvailability(
                 plot_id=plot.plot_id,
@@ -204,6 +206,7 @@ class ASFGUNWCatalog:
         label: str,
         category: str,
         parameters: dict[str, str],
+        processable: bool = False,
     ) -> DatasetAvailability:
         base = {**parameters, "intersectsWith": wkt}
         try:
@@ -244,6 +247,7 @@ class ASFGUNWCatalog:
                 products=products,
                 results_truncated=count > len(products),
                 message=f"{count:,} matching {label} products were found.",
+                processable=processable,
             )
         except (httpx.HTTPError, ValueError, TypeError, KeyError):
             return DatasetAvailability(
@@ -252,6 +256,7 @@ class ASFGUNWCatalog:
                 category=category,
                 status="check_failed",
                 message=CHECK_FAILED_MESSAGE,
+                processable=processable,
             )
 
     @staticmethod

@@ -59,6 +59,16 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def resume_processing_queue() -> None:
+    processing_service.start()
+
+
+@app.on_event("shutdown")
+def stop_processing_queue() -> None:
+    processing_service.close()
+
+
 def require_technical_access(
     supplied_key: Annotated[str | None, Header(alias="X-Technical-API-Key")] = None,
 ) -> None:
@@ -202,7 +212,6 @@ def get_gunw_availability(selection_id: str) -> GUNWAvailability | JSONResponse:
 )
 def create_processing_run(
     selection_id: str,
-    background_tasks: BackgroundTasks,
     _authorized: Annotated[None, Depends(require_technical_access)],
 ) -> ProcessingRun | JSONResponse:
     run = processing_service.queue(selection_id)
@@ -215,7 +224,6 @@ def create_processing_run(
             )
         )
         return JSONResponse(status_code=404, content=payload.model_dump(exclude_none=True))
-    background_tasks.add_task(processing_service.execute, run.run_id)
     return run
 
 

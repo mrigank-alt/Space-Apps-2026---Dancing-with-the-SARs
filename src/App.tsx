@@ -519,9 +519,9 @@ export default function App() {
                     </div>
                     <p>
                       {["available", "partial", "source_available"].includes(confirmed.gunw_availability.status)
-                        ? "We found imagery that covers your land. Your saved plots are ready for the next step."
+                        ? confirmed.gunw_availability.message
                         : confirmed.gunw_availability.status === "not_available"
-                          ? "Your farm is saved. We couldn’t find suitable imagery for this land right now."
+                          ? confirmed.gunw_availability.message
                           : confirmed.gunw_availability.status === "checking"
                             ? "You can continue using the app while we check coverage for your plots."
                             : "Your farm is saved. We’ll need to check imagery availability again later."}

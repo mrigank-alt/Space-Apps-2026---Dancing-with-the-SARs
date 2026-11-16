@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import type { Assessment, ConcernLevel, ConcernZoneProperties } from "../types";
 
 const levelLabel: Record<ConcernLevel, string> = {
-  green: "Looks steady",
-  yellow: "Needs a closer look",
-  red: "Needs prompt attention",
+  green: "Low measured movement",
+  yellow: "Movement / uncertainty to review",
+  red: "Strong movement: prompt review",
   grey: "More information needed",
 };
 
@@ -22,26 +22,7 @@ interface Props {
 }
 
 function actionSteps(assessment: Assessment) {
-  if (assessment.overall_concern === "grey") {
-    return [
-      ["Check the mapped plots", "Confirm the saved field boundaries are correct and note where satellite coverage is missing."],
-      ["Keep basic field records", "Record irrigation dates, pump hours, and any cracks or uneven ground you notice."],
-      ["Try again when new imagery arrives", "A later satellite pass may provide enough reliable information to assess the land."],
-    ];
-  }
-  if (assessment.overall_concern === "green") {
-    return [
-      ["Keep your normal field checks", "No unusual area stands out right now. Continue watching for cracks, ponding, or uneven ground."],
-      ["Keep pumping and irrigation records", "Simple dates, hours, and meter readings will make future results more useful."],
-      ["Refresh after new imagery", "A longer record helps show whether the land remains steady over time."],
-    ];
-  }
-  return [
-    ["Walk the highlighted area", "Before the next irrigation cycle, look for new cracks, sinking, uneven rows, ponding, or damaged pipes."],
-    ["Check which wells serve this plot", "Write down pump hours or meter readings for the highlighted land. Do not make a major pumping change from this map alone."],
-    ["Compare a nearby well reading", "A current and historical water-level measurement can show whether groundwater decline may be related."],
-    ["Ask for local review if signs are visible", "If you find damage or rapid change, contact a local groundwater, irrigation, or geotechnical specialist."],
-  ];
+  return assessment.recommendations.map((item) => [item.title, item.detail]);
 }
 
 export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZone, refreshing, onSelectPlot, onRefresh, onSelectAssessment }: Props) {
@@ -78,7 +59,7 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
           <h3 id="assessment-title">{levelLabel[assessment.overall_concern]}</h3>
           <p>
             {attentionCount > 0
-              ? `${attentionCount} mapped ${attentionCount === 1 ? "area may be" : "areas may be"} moving differently from the rest of your farm.`
+              ? `${attentionCount} mapped ${attentionCount === 1 ? "area may be" : "areas may be"} showing movement or uncertainty that needs verification.`
               : assessment.summary}
           </p>
         </div>
@@ -102,11 +83,12 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
           </div>
 
           <div className="simple-legend" aria-label="Map colors">
-            <span className="legend-green"><i />Looks steady</span>
-            <span className="legend-yellow"><i />Take a closer look</span>
-            <span className="legend-red"><i />Prompt attention</span>
+            <span className="legend-green"><i />Low measured movement</span>
+            <span className="legend-yellow"><i />Movement / uncertainty to review</span>
+            <span className="legend-red"><i />Strong movement: prompt review</span>
             <span className="legend-grey"><i />More information needed</span>
           </div>
+          <p className="plain-language-note">Use “LOS movement” on the map to view measured line-of-sight velocity. “Movement review” screens farm-wide movement, local differences, and unresolved uncertainty; neither layer alone identifies groundwater causation.</p>
 
           {selectedZone ? (
             <div className={`farmer-zone-card level-${selectedLevel}`}>
@@ -167,7 +149,7 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
         <div className="insight-view" role="tabpanel">
           <div className="plain-language-note">
             <strong>How to read this result</strong>
-            <p>We compare movement across your own farm. A highlighted area means “look here,” not “groundwater definitely caused damage.”</p>
+            <p>We screen LOS movement and uncertainty. Yellow includes measurements needing verification; green requires small movement and calibrated uncertainty. The summary uses the dominant class by land area.</p>
           </div>
           <div className="confidence-card">
             <div><strong>How certain are we?</strong><span className={`quality-${assessment.evidence_quality}`}>{assessment.evidence_quality}</span></div>
@@ -179,6 +161,22 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
             {assessment.groundwater.trend_summary && <p>{assessment.groundwater.trend_summary}</p>}
             {!assessment.groundwater.relationship_eligible && <small>We are not claiming groundwater caused the movement.</small>}
           </div>
+          {assessment.climate && (
+            <details className="limitations">
+              <summary>Monthly weather context: {assessment.climate.status.replaceAll("_", " ")}</summary>
+              <p>{assessment.climate.summary}</p>
+              <p>Plot reference: {assessment.climate.location.coordinates[1].toFixed(4)} latitude, {assessment.climate.location.coordinates[0].toFixed(4)} longitude. No validated local seasonal subsidence baseline is available.</p>
+              {assessment.climate.monthly.length > 0 && <table>
+                <thead><tr><th>Month</th><th>Mean Celsius</th><th>Rain mm</th></tr></thead>
+                <tbody>{assessment.climate.monthly.map((month) => <tr key={month.month}>
+                  <td>{month.month}{month.partial_calendar_month ? " (partial)" : ""}</td>
+                  <td>{month.mean_temperature_c?.toFixed(1) ?? "Unavailable"}</td>
+                  <td>{month.precipitation_mm?.toFixed(1) ?? "Incomplete"}</td>
+                </tr>)}</tbody>
+              </table>}
+              <a href={assessment.climate.source_url} target="_blank" rel="noreferrer">Open-Meteo weather source and attribution</a>
+            </details>
+          )}
           <details className="limitations">
             <summary>See the measurement details</summary>
             {selectedZone && <p>Selected area movement: {selectedZone.observed_los_change_cm == null ? "not available" : `${selectedZone.observed_los_change_cm.toFixed(2)} cm along the satellite view`}.</p>}

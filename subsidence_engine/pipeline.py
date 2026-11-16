@@ -26,6 +26,64 @@ from .sbas import SbasResult, invert_sbas
 log = logging.getLogger("subsidence_engine")
 
 
+def _closure_diagnostics(pair_displacement: np.ndarray, pair_start: np.ndarray,
+                         pair_end: np.ndarray) -> dict[str, Any]:
+    """Summarize triangle closure errors; diagnostics only, thresholds need validation."""
+    edges: dict[tuple[int, int], int] = {}
+    for index, (start, end) in enumerate(zip(pair_start, pair_end)):
+        a, b = int(start), int(end)
+        edges.setdefault((min(a, b), max(a, b)), index)
+    epochs = sorted({int(x) for x in pair_start} | {int(x) for x in pair_end})
+    triplets = []
+    for i, a in enumerate(epochs):
+        for j in range(i + 1, len(epochs)):
+            b = epochs[j]
+            ab = edges.get((a, b))
+            if ab is None:
+                continue
+            for c in epochs[j + 1:]:
+                bc, ac = edges.get((b, c)), edges.get((a, c))
+                if bc is None or ac is None:
+                    continue
+                def directed(edge_index: int, source: int, target: int) -> np.ndarray:
+                    if int(pair_start[edge_index]) == source and int(pair_end[edge_index]) == target:
+                        return pair_displacement[edge_index]
+                    return -pair_displacement[edge_index]
+                closure = directed(ab, a, b) + directed(bc, b, c) - directed(ac, a, c)
+                finite = np.isfinite(closure)
+                values = np.abs(closure[finite])
+                if values.size:
+                    triplets.append({"epochs": [a, b, c], "pixel_count": int(values.size),
+                                     "median_abs_cm": float(np.median(values)),
+                                     "p95_abs_cm": float(np.percentile(values, 95))})
+    if not triplets:
+        return {"status": "insufficient_network_cycles", "cycle_count": 0,
+                "threshold_status": "not_calibrated", "triplets": []}
+    return {"status": "measured_threshold_not_calibrated", "cycle_count": len(triplets),
+            "median_triplet_median_abs_cm": float(np.median([x["median_abs_cm"] for x in triplets])),
+            "median_triplet_p95_abs_cm": float(np.median([x["p95_abs_cm"] for x in triplets])),
+            "threshold_status": "not_calibrated", "triplets": triplets}
+
+
+def _reference_diagnostics(stack_data: dict[str, np.ndarray]) -> dict[str, Any]:
+    raw = stack_data.get("reference_diagnostics_json")
+    if raw is None:
+        return {"status": "not_recorded", "stable": None}
+    try:
+        pairs = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return {"status": "invalid_diagnostics", "stable": None}
+    measured = [item for item in pairs if item.get("status") == "measured"]
+    if not measured:
+        return {"status": "insufficient_reference_support", "stable": None,
+                "measured_pair_count": 0, "pair_count": len(pairs)}
+    return {"status": "measured_stability_not_independently_verified", "stable": None,
+            "measured_pair_count": len(measured), "pair_count": len(pairs),
+            "median_residual_mad_cm": float(np.median([x["residual_mad_cm"] for x in measured])),
+            "median_residual_p95_abs_cm": float(np.median([x["residual_p95_abs_cm"] for x in measured])),
+            "pairs": pairs}
+
+
 def _gradient(rate: np.ndarray, transform: tuple[float, ...]) -> np.ndarray:
     px_x, px_y = abs(transform[0]), abs(transform[4])
     gy, gx = np.gradient(rate.astype(np.float32), px_y, px_x)
@@ -87,16 +145,9 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
         source_dir = run_dir / "source_screening"
         source_dir.mkdir()
         script = Path(__file__).resolve().parents[1] / "nisar_selection_subsidence.py"
-        cache_dir = cfg.output_root / ".cache" / cfg.aoi_id
+        # Keep reusable source clips independent of per-run output folders.
+        cache_dir = Path.home() / ".cache" / "groundsignal"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        # Migrate reusable raw and multilooked clips from prior per-run caches.
-        prior_caches = sorted((cfg.output_root / cfg.aoi_id).glob("*/source_screening/clip_cache"),
-                              key=lambda p: p.stat().st_mtime, reverse=True)
-        for old_cache in prior_caches:
-            for cached in old_cache.glob("*.npz"):
-                target = cache_dir / cached.name
-                if not target.exists():
-                    shutil.copy2(cached, target)
         command = [sys.executable, str(script), "--output", str(source_dir), "--cache-dir", str(cache_dir),
                    "--no-plots", "--serial", "--engine-export-only"]
         if not cfg.remove_ramp:
@@ -138,6 +189,9 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
     with np.load(stack_path, allow_pickle=False) as z:
         data = {key: z[key] for key in z.files}
     phase_processing = str(data.get("phase_processing", "unknown_preprocessed_input"))
+    reference_quality = _reference_diagnostics(data)
+    closure_quality = _closure_diagnostics(
+        data["pair_displacement_cm"], data["pair_start"], data["pair_end"])
     if phase_processing == "unknown_preprocessed_input":
         log.warning("Input stack has no phase-processing provenance. Regenerate from cached clips to apply reference-only ramp fitting.")
     if "pair_coherence" not in data:
@@ -349,8 +403,13 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
         "heatmap_csv": str(csv_path.relative_to(run_dir)),
         "speed": {"source_search_download_and_stack_export_seconds": source_screening_seconds,
                   "sbas_solver_seconds": sbas_seconds, "elapsed_total_seconds": time.perf_counter() - run_started,
-                  "source_pairs_fetched": source_metrics.get("clips_fetched_from_harmony")},
+                  "source_pairs_fetched": source_metrics.get("clips_fetched_from_harmony"),
+                  "acquisition_stages": source_metrics.get("stage_seconds"),
+                  "acquisition_config": source_metrics.get("acquisition_config"),
+                  "acquisition_timing_semantics": source_metrics.get("timing_semantics"),
+                  "acquisition_events": str(source_dir / "acquisition_events.jsonl")},
         "accuracy_benchmark": comparison,
+        "signal_quality_diagnostics": {"reference": reference_quality, "temporal_closure": closure_quality},
         "quality_summary": quality_summary,
         "requested_date_range": {"start_inclusive": cfg.start_date, "end_exclusive": cfg.end_date},
         "measurement_interval": {"start": epoch_labels[0], "end": epoch_labels[-1],
@@ -374,7 +433,7 @@ def run_pipeline(config: PipelineConfig | dict[str, Any]) -> dict[str, Any]:
                               "Harmony did not expose the GUNW 3-D incidence-angle metadata cube as a raster; vertical fields are null and LOS fields are supplied.",
                               "The 9-pair/10-epoch network has zero independent cycles; formal uncertainty fields are null.",
                               "Acceleration is null for this four-month span; seasonal/long-term split requires at least twelve months.",
-                              "Closure-based unwrapping quality flags and temporal coherence are not emitted by this stage.",
+                              "Reference residual dispersion and triangle closure are reported as diagnostics; stability and alarm thresholds are not validated, so neither is used as an automatic pass/fail gate.",
                               "Ancillary providers are unconfigured pending official endpoint and license verification."]
     }
     manifest_path = run_dir / "manifest.json"

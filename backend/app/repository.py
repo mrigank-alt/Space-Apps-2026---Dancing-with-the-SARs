@@ -24,6 +24,12 @@ class SelectionRepository(Protocol):
 
     def list_processing_runs(self, selection_id: str) -> list[ProcessingRun]: ...
 
+    def claim_processing_run(self, run: ProcessingRun) -> bool: ...
+
+    def recover_interrupted_processing_runs(self) -> list[str]: ...
+
+    def list_queued_processing_runs(self) -> list[ProcessingRun]: ...
+
     def save_assessment(self, assessment: Assessment) -> Assessment: ...
 
     def get_assessment(self, assessment_id: str) -> Assessment | None: ...
@@ -79,6 +85,31 @@ class InMemorySelectionRepository:
                 key=lambda run: run.created_at,
                 reverse=True,
             )
+
+    def claim_processing_run(self, run: ProcessingRun) -> bool:
+        with self._lock:
+            current = self._processing_runs.get(run.run_id)
+            if current is None or current.status != "queued":
+                return False
+            self._processing_runs[run.run_id] = run
+            return True
+
+    def recover_interrupted_processing_runs(self) -> list[str]:
+        with self._lock:
+            recovered = []
+            for run_id, run in list(self._processing_runs.items()):
+                if run.status == "running":
+                    queued = run.model_copy(update={"status": "queued", "started_at": None,
+                                                    "message": "Resuming analysis after a server restart.",
+                                                    "stage": "Waiting", "progress_percent": 5})
+                    self._processing_runs[run_id] = queued
+                    recovered.append(run_id)
+            return recovered
+
+    def list_queued_processing_runs(self) -> list[ProcessingRun]:
+        with self._lock:
+            return sorted((run for run in self._processing_runs.values() if run.status == "queued"),
+                          key=lambda run: run.created_at)
 
     def save_assessment(self, assessment: Assessment) -> Assessment:
         with self._lock:
@@ -319,6 +350,44 @@ class SQLiteSelectionRepository:
             rows = self._connection.execute(
                 "SELECT record_json FROM processing_runs WHERE selection_id = ? ORDER BY created_at DESC",
                 (selection_id,),
+            ).fetchall()
+        return [ProcessingRun.model_validate(json.loads(row["record_json"])) for row in rows]
+
+    def claim_processing_run(self, run: ProcessingRun) -> bool:
+        payload = json.dumps(run.model_dump(mode="json"), separators=(",", ":"))
+        updated_at = (run.started_at or run.created_at).isoformat()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "UPDATE processing_runs SET status = ?, record_json = ?, updated_at = ? "
+                "WHERE run_id = ? AND status = 'queued'",
+                (run.status, payload, updated_at, run.run_id),
+            )
+            return cursor.rowcount == 1
+
+    def recover_interrupted_processing_runs(self) -> list[str]:
+        recovered = []
+        with self._lock, self._connection:
+            rows = self._connection.execute(
+                "SELECT record_json FROM processing_runs WHERE status = 'running'"
+            ).fetchall()
+            for row in rows:
+                run = ProcessingRun.model_validate(json.loads(row["record_json"]))
+                queued = run.model_copy(update={"status": "queued", "started_at": None,
+                                                "message": "Resuming analysis after a server restart.",
+                                                "stage": "Waiting", "progress_percent": 5})
+                payload = json.dumps(queued.model_dump(mode="json"), separators=(",", ":"))
+                self._connection.execute(
+                    "UPDATE processing_runs SET status = 'queued', record_json = ?, updated_at = ? "
+                    "WHERE run_id = ? AND status = 'running'",
+                    (payload, queued.created_at.isoformat(), queued.run_id),
+                )
+                recovered.append(queued.run_id)
+        return recovered
+
+    def list_queued_processing_runs(self) -> list[ProcessingRun]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT record_json FROM processing_runs WHERE status = 'queued' ORDER BY created_at"
             ).fetchall()
         return [ProcessingRun.model_validate(json.loads(row["record_json"])) for row in rows]
 
