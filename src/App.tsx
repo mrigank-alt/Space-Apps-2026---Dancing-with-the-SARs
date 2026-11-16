@@ -303,11 +303,11 @@ export default function App() {
         </div>
         <div className="header-actions">
           <button type="button" className="demo-button" onClick={demoMode ? exitPresentationDemo : loadPresentationDemo}>
-            {demoMode ? "Exit demo" : "Instant presentation demo"}
+            {demoMode ? "Close sample" : "View San Joaquin Valley sample"}
           </button>
           <div className="product-status">
             <span />
-            {demoMode ? "SIMULATED DEMO" : confirmed ? "FARM MONITORING" : "FARM SETUP"}
+            {demoMode ? "SAN JOAQUIN SAMPLE" : confirmed ? "FARM MONITORING" : "FARM SETUP"}
           </div>
         </div>
       </header>

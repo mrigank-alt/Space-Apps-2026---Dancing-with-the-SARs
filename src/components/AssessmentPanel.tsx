@@ -67,7 +67,7 @@ export function AssessmentPanel({ assessment, history, selectedPlotId, selectedZ
     <section className="assessment-panel" aria-labelledby="assessment-title">
       {isDemo && (
         <div className="demo-disclaimer" role="note">
-          <strong>Presentation demo</strong>
+          <strong>San Joaquin Valley sample</strong>
           <span>These colors, measurements, groundwater records, and deadlines are simulated—not real farm advice.</span>
         </div>
       )}

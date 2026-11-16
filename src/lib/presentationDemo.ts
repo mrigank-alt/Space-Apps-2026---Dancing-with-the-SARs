@@ -4,14 +4,14 @@ import type { Assessment, ConcernLevel, ConcernZoneProperties, SearchResult, Sel
 type Coordinate = [number, number];
 
 const farmRing: Coordinate[] = [
-  [-120.224, 36.617],
-  [-120.211, 36.624],
-  [-120.196, 36.622],
-  [-120.187, 36.613],
-  [-120.192, 36.600],
-  [-120.210, 36.596],
-  [-120.225, 36.605],
-  [-120.224, 36.617],
+  [-120.236, 36.617],
+  [-120.223, 36.624],
+  [-120.208, 36.622],
+  [-120.199, 36.613],
+  [-120.204, 36.600],
+  [-120.222, 36.596],
+  [-120.237, 36.605],
+  [-120.236, 36.617],
 ];
 
 const farmGeometry: Polygon = {
@@ -99,9 +99,9 @@ const levelDetails: Record<Exclude<ConcernLevel, "grey">, {
 };
 
 function buildConcernGrid(): Array<Feature<Polygon, ConcernZoneProperties>> {
-  const west = -120.225;
+  const west = -120.237;
   const south = 36.596;
-  const east = -120.187;
+  const east = -120.199;
   const north = 36.624;
   const columns = 6;
   const rows = 5;
@@ -147,29 +147,29 @@ const concernGrid = buildConcernGrid();
 
 export const PRESENTATION_DEMO_LOCATION: SearchResult = {
   id: "presentation-demo",
-  label: "Sample farm near San Joaquin, California",
-  context: "Presentation demo · simulated results",
-  center: [-120.206, 36.610],
-  bbox: [-120.225, 36.596, -120.187, 36.624],
+  label: "San Joaquin Valley Farm, California",
+  context: "San Joaquin Valley, California · simulated results",
+  center: [-120.218, 36.610],
+  bbox: [-120.237, 36.596, -120.199, 36.624],
   kind: "demo",
 };
 
 export const PRESENTATION_DEMO_SELECTION: SelectionResponse = {
   selection_id: "demo_presentation_farm",
-  label: "Sample Valley Farm — Demo",
+  label: "San Joaquin Valley Farm",
   geometry: farmGeometry,
-  bbox: [-120.225, 36.596, -120.187, 36.624],
-  centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
-  reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
+  bbox: [-120.237, 36.596, -120.199, 36.624],
+  centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.218, 36.610] }, properties: {} },
+  reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.218, 36.610] }, properties: {} },
   area: { square_meters: 6_680_000, hectares: 668, acres: 1_650.7 },
   plot_count: 1,
   plots: [{
     plot_id: "demo_plot_001",
     plot_index: 1,
     geometry: farmGeometry,
-    bbox: [-120.225, 36.596, -120.187, 36.624],
-    centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
-    reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.206, 36.610] }, properties: {} },
+    bbox: [-120.237, 36.596, -120.199, 36.624],
+    centroid: { type: "Feature", geometry: { type: "Point", coordinates: [-120.218, 36.610] }, properties: {} },
+    reference_point: { type: "Feature", geometry: { type: "Point", coordinates: [-120.218, 36.610] }, properties: {} },
     area: { square_meters: 6_680_000, hectares: 668, acres: 1_650.7 },
   }],
   farmer: { operator_name: "Sample Farmer", contact_email: "demo@example.com" },
@@ -191,7 +191,7 @@ export const PRESENTATION_DEMO_SELECTION: SelectionResponse = {
     archived_gunw_product_count: 9,
     sentinel1_source_scene_count: 0,
     on_demand_processing_may_be_possible: false,
-    message: "Sample imagery is ready for this presentation demo.",
+    message: "Sample imagery is ready for the San Joaquin Valley farm sample.",
     earthdata_login_required_for_download: false,
     plot_results: [{
       plot_id: "demo_plot_001",
@@ -245,7 +245,7 @@ export const PRESENTATION_DEMO_ASSESSMENT: Assessment = {
     monitoring_site_count: 2,
     relationship_eligible: true,
     relationship_assessment: "supports",
-    trend_summary: "Sample well levels declined during the demonstration period.",
+    trend_summary: "Sample well levels declined during the illustrated period.",
     summary: "Simulated nearby well records support taking a closer look at the highlighted areas.",
     limitations: ["Presentation values are simulated and must not be used for farm decisions."],
   },
@@ -259,13 +259,13 @@ export const PRESENTATION_DEMO_ASSESSMENT: Assessment = {
     pumping_target: null,
     pumping_target_units: null,
     missing_inputs: [],
-    model_version: "presentation-demo",
-    calibration_id: "simulated-demo",
+    model_version: "presentation-sample",
+    calibration_id: "simulated-sample",
     threshold_source: "simulated presentation scenario",
     limitations: ["This deadline is simulated for presentation purposes."],
   },
   limitations: [
-    "Presentation demo only: all movement, groundwater, and deadline values are simulated.",
+    "San Joaquin Valley sample only: all movement, groundwater, and deadline values are simulated.",
     "Do not use this example to make pumping, irrigation, or safety decisions.",
   ],
   provenance: { demo: true, data_source: "simulated presentation data" },
